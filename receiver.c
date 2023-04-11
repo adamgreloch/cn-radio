@@ -4,93 +4,68 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
-#include "err.h"
 #include "common.h"
+#include "err.h"
+#include "pack_buffer.h"
 
 #define BUFFER_SIZE 20000
-
-byte *pack_buffer;
-byte *is_filled;
-uint64_t buffer_oldest = 0;
-uint64_t buffer_newest = 0;
-uint64_t next_to_read = 0;
-pthread_mutex_t mutex;
-pthread_cond_t missing_next;
-pthread_cond_t wait_for_fill;
 
 uint16_t port = DEFAULT_PORT;       // UDP data port
 uint64_t bsize = DEFAULT_BSIZE;     // buffer size
 uint64_t psize = DEFAULT_PSIZE;
 
-void pack_buffer_reset() {
-    memset(pack_buffer, 0, bsize);
-    buffer_oldest = 0;
-    buffer_newest = 0;
-    next_to_read = 0;
+void print_debug(struct sockaddr_in *client_address, struct audio_pack
+*pack,
+                 uint64_t read_length) {
+    fprintf(stderr, "\e[1;1H\e[2J");
+    fprintf(stderr, "\nfirst_byte_num=%lu\n", ntohll(pack->first_byte_num));
+    fprintf(stderr, "psize=%u\n", psize);
+    fprintf(stderr, "session_id=%lu\n", ntohll(pack->session_id));
+
+    char *client_ip = inet_ntoa(client_address->sin_addr);
+    uint16_t client_port = ntohs(client_address->sin_port);
+
+    fprintf(stderr, "received %zd bytes from client %s:%u\n",
+            read_length, client_ip, client_port);
 }
 
-void insert_pack(uint64_t first_byte_num, byte *data) {
-    CHECK_ERRNO(pthread_mutex_lock(&mutex));
-    uint64_t pos = buffer_oldest;
 
-    while (first_byte_num - buffer_oldest > bsize) {
-        // oldest is too old
-        // remove it from buffer and bump one step up
-        pos = buffer_oldest % bsize;
+uint64_t curr_session_id;
+uint64_t last_session_id = 0;
 
-        if (pack_buffer[pos % bsize] != 0) {
-            memset(pack_buffer + (pos % bsize), 0, psize);
-            is_filled[(pos % bsize) / psize] = 0;
-        }
+pack_buffer *audio_pack_buffer;
 
-        buffer_oldest += psize;
-    }
+size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer) {
+    struct sockaddr_in client_address;
+    size_t read_length;
 
-    while (pos < first_byte_num) {
-        if (is_filled[(pos % bsize) / psize] == 0) {
-            fprintf(stderr, "MISSING: BEFORE %lu EXPECTED %lu\n",
-                    first_byte_num, pos);
-        }
-        pos = pos + psize;
-    }
+    socklen_t address_length = (socklen_t) sizeof(client_address);
 
-    memcpy(pack_buffer + (first_byte_num % bsize), data, psize);
-    is_filled[(first_byte_num % bsize) / psize] = 1;
+    int flags = 0;
 
-    if (first_byte_num > buffer_newest) {
-        buffer_newest = first_byte_num;
-        if (buffer_newest >= bsize / 4 * 3)
-            CHECK_ERRNO(pthread_cond_signal(&wait_for_fill));
-        else
-            fprintf(stderr, "WAITING FOR BUFFER TO FILL (%f)\n",
-                    (float) buffer_newest / (float) (bsize / 4 * 3));
-    }
+    errno = 0;
 
-    if (first_byte_num == next_to_read)
-        CHECK_ERRNO(pthread_cond_signal(&missing_next));
+    memset(buffer, 0, BUFFER_SIZE);
 
-    CHECK_ERRNO(pthread_mutex_unlock(&mutex));
-}
+    read_length = recvfrom(socket_fd, buffer, BUFFER_SIZE,
+                           flags, (struct sockaddr *) &client_address,
+                           &address_length);
 
-void pop_next(byte *buf) {
-    CHECK_ERRNO(pthread_mutex_lock(&mutex));
+    psize = read_length - sizeof(struct audio_pack);
 
-    while (buffer_newest < bsize / 4 * 3)
-        CHECK_ERRNO(pthread_cond_wait(&wait_for_fill, &mutex));
+    *pack = (struct audio_pack *) buffer;
+    (*pack)->audio_data = buffer + sizeof(struct audio_pack);
 
-    while (is_filled[(next_to_read % bsize) / psize] == 0)
-        CHECK_ERRNO(pthread_cond_wait(&missing_next, &mutex));
+    curr_session_id = ntohll((*pack)->session_id);
 
-    memcpy(buf, pack_buffer + (next_to_read % bsize), psize);
-    memset(pack_buffer + (next_to_read % bsize), 0, psize);
-    is_filled[(next_to_read % bsize) / psize] = 0;
+    if (curr_session_id > last_session_id)
+        pb_reset(audio_pack_buffer, psize);
 
-    if (next_to_read == buffer_oldest)
-        buffer_oldest += psize;
+    last_session_id = curr_session_id;
 
-    next_to_read += psize;
+    print_debug(&client_address, *pack, read_length);
 
-    CHECK_ERRNO(pthread_mutex_unlock(&mutex));
+    return read_length;
 }
 
 void *gather_packs() {
@@ -98,63 +73,15 @@ void *gather_packs() {
     if (!buffer)
         fatal("malloc");
 
-    is_filled = malloc(BUFFER_SIZE); // TODO temp
-
     int socket_fd = bind_socket(port);
 
-    struct sockaddr_in client_address;
-
+    struct audio_pack *pack;
     size_t read_length;
-    struct audio_pack pack;
-
-    uint64_t curr_session_id;
-    uint64_t last_session_id = 0;
 
     do {
-        memset(buffer, 0, BUFFER_SIZE);
-
-        socklen_t address_length = (socklen_t) sizeof(client_address);
-
-        int flags = 0;
-
-        errno = 0;
-        ENSURE(sizeof(struct audio_pack) == recvfrom(socket_fd, &pack, sizeof
-                                                             (struct audio_pack), flags, (struct sockaddr *) &client_address,
-                                                     &address_length));
-
-        memset(buffer, 0, BUFFER_SIZE);
-
-        curr_session_id = htonll(pack.session_id);
-        if (curr_session_id > last_session_id) {
-            pack_buffer_reset();
-        }
-
-        last_session_id = curr_session_id;
-
-        read_length = recvfrom(socket_fd, buffer, BUFFER_SIZE,
-                               flags, (struct sockaddr *) &client_address,
-                               &address_length);
-
-        psize = read_length;
-
-        pack.audio_data = (byte *) buffer;
-
-        if (read_length < 0) {
-            PRINT_ERRNO();
-        }
-
-        fprintf(stderr, "\nfirst_byte_num=%lu\n", ntohll(pack.first_byte_num));
-        fprintf(stderr, "psize=%u\n", psize);
-        fprintf(stderr, "session_id=%lu\n", ntohll(pack.session_id));
-
-        char *client_ip = inet_ntoa(client_address.sin_addr);
-        uint16_t client_port = ntohs(client_address.sin_port);
-
-        fprintf(stderr, "received %zd bytes from client %s:%u\n",
-                read_length, client_ip, client_port);
-
-        insert_pack(ntohll(pack.first_byte_num), pack.audio_data);
-
+        read_length = receive_pack(socket_fd, &pack, buffer);
+        pb_push_back(audio_pack_buffer, ntohll(pack->first_byte_num),
+                     pack->audio_data, psize);
     } while (read_length > 0);
 
     CHECK_ERRNO(close(socket_fd));
@@ -168,7 +95,7 @@ void *print_packs() {
         fatal("calloc");
 
     while (true) {
-        pop_next(write_buffer);
+        pb_pop_front(audio_pack_buffer, write_buffer, psize);
         fwrite(write_buffer, psize, sizeof(byte), stdout);
     }
 
@@ -176,14 +103,7 @@ void *print_packs() {
 }
 
 int main() {
-    pack_buffer = malloc(bsize);
-    if (!pack_buffer)
-        fatal("malloc");
-
-    memset(pack_buffer, 0, bsize);
-
-    CHECK_ERRNO(pthread_mutex_init(&mutex, NULL));
-    CHECK_ERRNO(pthread_cond_init(&missing_next, NULL));
+    audio_pack_buffer = pb_init(bsize);
 
     pthread_t gatherer_id;
     pthread_t printer_id;
@@ -194,8 +114,7 @@ int main() {
     CHECK_ERRNO(pthread_join(gatherer_id, NULL));
     CHECK_ERRNO(pthread_join(printer_id, NULL));
 
-    CHECK_ERRNO(pthread_mutex_destroy(&mutex));
-    free(pack_buffer);
+    pb_free(audio_pack_buffer);
 
     return 0;
 }

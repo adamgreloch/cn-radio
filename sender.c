@@ -8,21 +8,41 @@ size_t read_pack(FILE *stream, uint64_t pack_size, byte *data) {
     return fread(data, sizeof(byte), pack_size, stream);
 }
 
+//void send_pack(int socket_fd, const struct sockaddr_in *dest_address,
+//               const struct audio_pack *pack, size_t psize) {
+//    socklen_t address_length = (socklen_t) sizeof(*dest_address);
+//    int flags = 0;
+//
+//    ssize_t sent_size = sendto(socket_fd, pack, sizeof(*pack), flags,
+//                               (struct sockaddr *) dest_address,
+//                               address_length);
+//
+//    ENSURE(sent_size == (ssize_t) sizeof(*pack));
+//
+//    sent_size = sendto(socket_fd, pack->audio_data, psize, flags,
+//                       (struct sockaddr *) dest_address, address_length);
+//
+//    ENSURE(sent_size == (ssize_t) psize);
+//}
+
 void send_pack(int socket_fd, const struct sockaddr_in *dest_address,
                const struct audio_pack *pack, size_t psize) {
     socklen_t address_length = (socklen_t) sizeof(*dest_address);
     int flags = 0;
 
-    ssize_t sent_size = sendto(socket_fd, pack, sizeof(*pack), flags,
-                               (struct sockaddr *) dest_address,
-                               address_length);
+    uint64_t data_size = psize + sizeof(struct audio_pack);
 
-    ENSURE(sent_size == (ssize_t) sizeof(*pack));
+    byte *packet = malloc(data_size);
 
-    sent_size = sendto(socket_fd, pack->audio_data, psize, flags,
-                       (struct sockaddr *) dest_address, address_length);
+    memcpy(packet, pack, sizeof(struct audio_pack));
+    memcpy(packet + sizeof(struct audio_pack), pack->audio_data, psize);
 
-    ENSURE(sent_size == (ssize_t) psize);
+    ssize_t sent_size = sendto(socket_fd, packet, data_size, flags,
+                               (struct sockaddr *) dest_address, address_length);
+
+    ENSURE(sent_size == data_size);
+
+    free(packet);
 }
 
 int main() {
