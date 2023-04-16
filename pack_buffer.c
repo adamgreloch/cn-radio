@@ -12,11 +12,17 @@ typedef struct pack_buffer {
     size_t count;     // number of items in the buffer
     byte *head;       // pointer to head
     uint64_t head_byte_num;
+    uint64_t byte_zero;
     byte *tail;       // pointer to tail
 
+    uint64_t session_id;
+
     pthread_mutex_t mutex;
-    pthread_cond_t wait_for_fill;
-    pthread_cond_t wait_for_deplete;
+    pthread_cond_t init_fill;
+    bool waiting;
+    bool init_wait;
+    pthread_cond_t full_buffer;
+    pthread_cond_t empty_buffer;
 } pack_buffer;
 
 
@@ -34,11 +40,14 @@ pack_buffer *pb_init(size_t bsize) {
     pb->psize = 0;
     pb->count = 0;
     pb->head = pb->tail = pb->buffer;
-    pb->head_byte_num = 0;
+    pb->head_byte_num = pb->byte_zero = 0;
+    pb->waiting = false;
+    pb->session_id = 0;
 
     CHECK_ERRNO(pthread_mutex_init(&pb->mutex, NULL));
-    CHECK_ERRNO(pthread_cond_init(&pb->wait_for_fill, NULL));
-    CHECK_ERRNO(pthread_cond_init(&pb->wait_for_deplete, NULL));
+    CHECK_ERRNO(pthread_cond_init(&pb->init_fill, NULL));
+    CHECK_ERRNO(pthread_cond_init(&pb->full_buffer, NULL));
+    CHECK_ERRNO(pthread_cond_init(&pb->empty_buffer, NULL));
     return pb;
 }
 
@@ -48,7 +57,8 @@ void pb_free(pack_buffer *pb) {
     free(pb);
 }
 
-void pb_reset(pack_buffer *pb, uint64_t psize) {
+void pb_reset(pack_buffer *pb, uint64_t psize, uint64_t byte_zero,
+              uint64_t session_id) {
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
     memset(pb->buffer, 0, pb->capacity);
     memset(pb->is_present, 0, pb->capacity);
@@ -56,10 +66,75 @@ void pb_reset(pack_buffer *pb, uint64_t psize) {
     pb->buffer_end = (byte *) pb->buffer + pb->capacity;
     pb->psize = psize;
     pb->count = 0;
-    pb->head_byte_num = 0;
 
+    pb->session_id = session_id;
+
+    pb->head_byte_num = pb->byte_zero = byte_zero;
     pb->head = pb->tail = pb->buffer;
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
+}
+
+void print_missing(pack_buffer *pb, uint64_t first_byte_num) {
+    // TODO check whether this really works:
+    byte *pos = pb->tail;
+    uint64_t missing_byte_num;
+    while (pos != pb->head) {
+        if (!pb->is_present[pos - pb->buffer]) {
+            if (pos < pb->head)
+                missing_byte_num = pb->head_byte_num - (pb->head - pos);
+            else
+                missing_byte_num = pb->head_byte_num
+                                   - (pb->head - pb->buffer + pb->buffer_end -
+                                      pos);
+
+            fprintf(stderr, "MISSING: BEFORE %lu EXPECTED %lu\n",
+                    first_byte_num, missing_byte_num);
+        }
+        pos += pb->psize;
+
+        // TODO handle overlap when bsize isnt divisible by psize
+        if (pos == pb->buffer_end)
+            pos = pb->buffer;
+    }
+}
+
+uint64_t insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
+                                 const byte *pack) {
+    // reserve space for missing packs if there are any (if missing > 0)
+    uint64_t missing = first_byte_num - pb->head_byte_num;
+
+    uint64_t pack_num;
+
+    if (pb->head + missing >= pb->buffer_end) {
+        // buffer overflow
+        uint64_t before_overflow_count = pb->buffer_end - pb->head;
+
+        memset(pb->head, 0, before_overflow_count);
+        memset(pb->buffer + missing - before_overflow_count, 0, pb->psize);
+        memcpy(pb->buffer + missing - before_overflow_count + pb->psize, pack,
+               pb->psize);
+
+        pb->head = pb->buffer + missing - before_overflow_count + 2 * pb->psize;
+        if (pb->buffer + (missing % pb->capacity) + pb->psize >= pb->tail) {
+            // head overlapped the tail
+            memset(pb->tail, 0, pb->head - pb->tail);
+            pb->tail = pb->head + pb->psize;
+
+            if (pb->tail == pb->buffer_end)
+                pb->tail = pb->buffer;
+        }
+        pack_num = pb->head - pb->buffer - pb->psize;
+    } else {
+        memcpy(pb->head + missing, pack, pb->psize);
+
+        pb->head = (byte *) pb->head + missing + pb->psize;
+        pack_num = pb->head - pb->buffer - pb->psize;
+
+        if (pb->head == pb->buffer_end)
+            pb->head = pb->buffer;
+    }
+
+    return pack_num;
 }
 
 void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
@@ -67,55 +142,44 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
     if (pb->psize != psize) {}
 
-    while (pb->count * psize == pb->capacity)
-        CHECK_ERRNO(pthread_cond_wait(&pb->wait_for_deplete, &pb->mutex));
+    while ((pb->count + 1) * psize > pb->capacity) {
+        pb->waiting = true;
+        CHECK_ERRNO(pthread_cond_wait(&pb->full_buffer, &pb->mutex));
+        pb->waiting = false;
+    }
 
     if (pb->head_byte_num > first_byte_num) {
-        // encountered a missing pack
-        memcpy(pb->head + first_byte_num - pb->head_byte_num, pack, psize);
-        pb->count++;
-        fprintf(stderr, "MISSING PACK FOUND\n");
+        // encountered a missing or duplicated pack
+        memcpy(pb->head + pb->head_byte_num - first_byte_num, pack, psize);
+
+        uint64_t pack_num = (pb->head + pb->head_byte_num - first_byte_num) -
+                            pb->buffer;
+
+        if (!pb->is_present[pack_num]) {
+            // found missing pack
+            pb->is_present[pack_num] = true;
+            pb->count++;
+        }
+
+        print_missing(pb, first_byte_num);
+
+        CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
         return;
     }
 
-    // reserve space for missing packs if there are any (if missing > 0)
-    uint64_t missing = first_byte_num - pb->head_byte_num;
-
-    fprintf(stderr, "%lu MISSING BYTES\n", missing);
-
-    // TODO check exactly what packs are missing
-    //  add bool is_present table that gets dynamically reallocated
-    //  on pb_reset() call
-
-    if (pb->head + missing >= pb->buffer_end) {
-        // buffer overflow
-        if (pb->buffer + (missing % pb->capacity) + psize >= pb->tail) {
-            // head would overlap the tail
-            fprintf(stderr, "OVERFLOW TAIL OVERLAP\n");
-
-            // TODO
-        } else {
-            fprintf(stderr, "OVERFLOW\n");
-            memcpy(pb->head + (missing % pb->capacity), pack, psize);
-            pb->head = pb->buffer + (missing % pb->capacity) + psize;
-        }
-    } else {
-        fprintf(stderr, "CAPACITY OK\n");
-        memcpy(pb->head + missing, pack, psize);
-        pb->head = (byte *) pb->head + missing + psize;
-
-        if (pb->head == pb->buffer_end)
-            pb->head = pb->buffer;
-    }
+    uint64_t pack_num = insert_pack_into_buffer(pb, first_byte_num, pack);
 
     pb->head_byte_num = first_byte_num + psize;
-
-    uint64_t pack_num = (&pb->head - &pb->buffer) / psize - 1;
     pb->is_present[pack_num] = true;
     pb->count++;
 
-    if (pb->count * psize >= pb->capacity / 4 * 3)
-        CHECK_ERRNO(pthread_cond_signal(&pb->wait_for_fill));
+    print_missing(pb, first_byte_num);
+
+    if (pb->waiting && pb->count > 0)
+        CHECK_ERRNO(pthread_cond_signal(&pb->empty_buffer));
+    else if (pb->init_wait && pb->head_byte_num - pb->byte_zero >=
+                              pb->capacity / 4 * 3)
+        CHECK_ERRNO(pthread_cond_signal(&pb->init_fill));
 
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 }
@@ -124,10 +188,20 @@ void pb_pop_front(pack_buffer *pb, void *item, uint64_t psize) {
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
     if (pb->psize != psize) {}
 
-    while (pb->count * psize < pb->capacity / 4 * 3)
-        CHECK_ERRNO(pthread_cond_wait(&pb->wait_for_fill, &pb->mutex));
+    while (pb->count == 0) {
+        pb->waiting = true;
+        CHECK_ERRNO(pthread_cond_wait(&pb->empty_buffer, &pb->mutex));
+        pb->waiting = false;
+    }
+
+    while (pb->head_byte_num - pb->byte_zero < pb->capacity / 4 * 3) {
+        pb->init_wait = true;
+        CHECK_ERRNO(pthread_cond_wait(&pb->init_fill, &pb->mutex));
+        pb->init_wait = false;
+    }
 
     memcpy(item, pb->tail, psize);
+    pb->is_present[pb->tail - pb->buffer] = false;
     pb->tail = (byte *) pb->tail + psize;
 
     if (pb->tail == pb->buffer_end)
@@ -135,8 +209,8 @@ void pb_pop_front(pack_buffer *pb, void *item, uint64_t psize) {
 
     pb->count--;
 
-    if (pb->count * psize < pb->capacity)
-        CHECK_ERRNO(pthread_cond_signal(&pb->wait_for_deplete));
+    if (pb->waiting && (pb->count + 1) * psize <= pb->capacity)
+        CHECK_ERRNO(pthread_cond_signal(&pb->full_buffer));
 
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 }

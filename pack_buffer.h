@@ -13,7 +13,8 @@ pack_buffer *pb_init(size_t bsize);
 
 void pb_free(pack_buffer *pb);
 
-void pb_reset(pack_buffer *pb, uint64_t psize);
+void pb_reset(pack_buffer *pb, uint64_t psize, uint64_t byte_zero, uint64_t
+session_id);
 
 void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
                   uint64_t psize);
