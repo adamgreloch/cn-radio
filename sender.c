@@ -29,7 +29,7 @@ void send_pack(int socket_fd, const struct sockaddr_in *dest_address,
     free(packet);
 }
 
-int main() {
+int main(int argc, char **argv) {
     uint16_t port = DEFAULT_PORT;      // UDP data port
     uint32_t psize = DEFAULT_PSIZE;    // audio_pack.audio_data size
 

@@ -68,7 +68,8 @@ int main() {
 
         memset(write_buffer, 0, BUFFER_SIZE);
 
-        if (pb_pop_front(audio_pack_buffer, write_buffer, psize))
-            fwrite(write_buffer, psize, sizeof(byte), stdout);
+        pb_pop_front(audio_pack_buffer, write_buffer, psize);
+
+        fwrite(write_buffer, psize, sizeof(byte), stdout);
     }
 }
