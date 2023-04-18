@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include "err.h"
 #include "common.h"
+#include "opts.h"
 
 size_t read_pack(FILE *stream, uint64_t pack_size, byte *data) {
     return fread(data, sizeof(byte), pack_size, stream);
@@ -30,12 +31,15 @@ void send_pack(int socket_fd, const struct sockaddr_in *dest_address,
 }
 
 int main(int argc, char **argv) {
-    uint16_t port = DEFAULT_PORT;      // UDP data port
-    uint32_t psize = DEFAULT_PSIZE;    // audio_pack.audio_data size
+    sender_opts *opts = get_sender_opts(argc, argv);
+
+    uint16_t port = opts->port;
+    uint32_t psize = opts->psize;
+    char *dest_addr = opts->dest_addr;
 
     int socket_fd = socket(PF_INET, SOCK_DGRAM, 0);
 
-    struct sockaddr_in server_address = get_send_address("127.0.0.1", port);
+    struct sockaddr_in server_address = get_send_address(dest_addr, port);
 
     uint64_t session_id = time(NULL);
 

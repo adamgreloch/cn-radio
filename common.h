@@ -6,19 +6,18 @@
 #include <netdb.h>
 #include "err.h"
 
-#define DEFAULT_PSIZE 512
-#define DEFAULT_PORT 28473
-#define DEFAULT_BSIZE 65536
-
 typedef uint8_t byte;
 
-// TODO is of size PSIZE+16 bytes? it appears so
 struct audio_pack {
+    /** id of session frm which the pack came from */
     uint64_t session_id;
-    uint64_t first_byte_num; // is divisible by PSIZE
-    byte *audio_data; // has exactly PSIZE bytes
-} __attribute__((__packed__));
 
+    /** first byte number of the pack. is divisible by PSIZE */
+    uint64_t first_byte_num;
+
+    /** raw audio pack of exactly PSIZE bytes */
+    byte *audio_data;
+} __attribute__((__packed__));
 
 int bind_socket(uint16_t port);
 
