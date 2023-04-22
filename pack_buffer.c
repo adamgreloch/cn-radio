@@ -78,7 +78,9 @@ void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
         }
 
         pos += pb->psize;
-        handle_buf_end_overlap(&pos, pb);
+
+        if (pb->head != pb->buf_end)
+            handle_buf_end_overlap(&pos, pb);
     }
 }
 
@@ -120,8 +122,6 @@ uint64_t normal_insert(pack_buffer *pb, uint64_t missing, const byte *pack) {
     pb->head = (byte *) pb->head + missing + pb->psize;
     uint64_t pack_num = pb->head - pb->buf - pb->psize;
 
-    handle_buf_end_overlap(&pb->head, pb);
-
     return pack_num;
 }
 
@@ -147,7 +147,6 @@ uint64_t insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
         // Nothing to worry about.
         pack_num = normal_insert(pb, missing, pack);
 
-
     return pack_num;
 }
 
@@ -171,8 +170,6 @@ first_byte_num, const byte *pack) {
         memcpy(pb->head + pb->head_byte_num - first_byte_num, pack,
                pb->psize);
     }
-
-    find_missing(pb, first_byte_num);
 }
 
 void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
@@ -183,6 +180,7 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
         if (pb->head_byte_num - first_byte_num < pb->capacity) {
             // Encountered a missing or duplicated pack.
             handle_missing_or_duplicated(pb, first_byte_num, pack);
+            find_missing(pb, first_byte_num);
             return;
         } else
             // Encountered a missing, but ancient package... ignore.
@@ -197,6 +195,7 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
     pb->count++;
 
     find_missing(pb, first_byte_num);
+    handle_buf_end_overlap(&pb->head, pb);
 }
 
 void pb_pop_front(pack_buffer *pb, void *item, uint64_t psize) {

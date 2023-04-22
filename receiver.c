@@ -11,6 +11,7 @@ uint64_t curr_session_id;
 uint64_t last_session_id = 0;
 
 pack_buffer *audio_pack_buffer;
+pthread_mutex_t mutex;
 
 size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
                     uint64_t *psize, uint64_t bsize) {
