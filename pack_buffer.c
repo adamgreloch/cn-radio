@@ -82,6 +82,49 @@ void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
     }
 }
 
+uint64_t
+handle_buffer_overflow(pack_buffer *pb, uint64_t missing, const byte *pack) {
+    // How many bytes left till the buffer end from current head.
+    uint64_t bytes_to_end = pb->buf_end - pb->head;
+
+    memset(pb->head, 0, bytes_to_end); // Wipe from head to end.
+
+    // How many slots left till the buffer end from current head.
+    // Important to introduce such value, since pb->capacity doesn't
+    // need to be divisible by pb->psize.
+    uint64_t packs_to_end = bytes_to_end / pb->psize;
+
+    // Reserve space for the rest of missing packages that land
+    // in the buffer beginning.
+    memset(pb->buf, 0, missing - packs_to_end * pb->psize);
+
+    // Place the pack in its new spot.
+    pb->head = pb->buf + missing - packs_to_end * pb->psize;
+    memcpy(pb->head, pack, pb->psize);
+    pb->head += pb->psize;
+
+    if (pb->head >= pb->tail) {
+        // Head overlapped the tail.
+        memset(pb->tail, 0, pb->head - pb->tail);
+        pb->tail = pb->head + pb->psize;
+        handle_buf_end_overlap(&pb->tail, pb);
+    }
+
+    // Return pack_num
+    return pb->head - pb->buf - pb->psize;
+}
+
+uint64_t normal_insert(pack_buffer *pb, uint64_t missing, const byte *pack) {
+    memcpy(pb->head + missing, pack, pb->psize);
+
+    pb->head = (byte *) pb->head + missing + pb->psize;
+    uint64_t pack_num = pb->head - pb->buf - pb->psize;
+
+    handle_buf_end_overlap(&pb->head, pb);
+
+    return pack_num;
+}
+
 uint64_t insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
                                  const byte *pack) {
     // Reserve space for missing packs, if there are any (if missing > 0).
@@ -97,34 +140,13 @@ uint64_t insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
         return missing;
     }
 
-    if (pb->head + missing >= pb->buf_end) {
+    if (pb->head + missing >= pb->buf_end)
         // Buffer overflow.
-        uint64_t before_overflow_count = pb->buf_end - pb->head - pb->psize;
+        pack_num = handle_buffer_overflow(pb, missing, pack);
+    else
+        // Nothing to worry about.
+        pack_num = normal_insert(pb, missing, pack);
 
-        // TODO test
-        memset(pb->head, 0, before_overflow_count);
-        memset(pb->buf + missing - before_overflow_count, 0, pb->psize);
-        memcpy(pb->buf + missing - before_overflow_count + pb->psize, pack,
-               pb->psize);
-
-        pb->head = pb->buf + missing - before_overflow_count + 2 * pb->psize;
-
-        if (pb->head >= pb->tail) {
-            // Head overlapped the tail.
-            memset(pb->tail, 0, pb->head - pb->tail);
-            pb->tail = pb->head + pb->psize;
-
-            handle_buf_end_overlap(&pb->tail, pb);
-        }
-        pack_num = pb->head - pb->buf - pb->psize;
-    } else {
-        memcpy(pb->head + missing, pack, pb->psize);
-
-        pb->head = (byte *) pb->head + missing + pb->psize;
-        pack_num = pb->head - pb->buf - pb->psize;
-
-        handle_buf_end_overlap(&pb->head, pb);
-    }
 
     return pack_num;
 }

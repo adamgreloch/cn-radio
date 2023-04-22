@@ -46,22 +46,21 @@ int main(int argc, char **argv) {
     uint64_t bsize = opts->bsize;
     char *from_addr = opts->from_addr;
 
+    int socket_fd = bind_socket(port);
+
     byte *buffer = malloc(bsize);
     if (!buffer)
         fatal("malloc");
-
-    int socket_fd = bind_socket(port);
-
-    struct audio_pack *pack;
-    size_t read_length;
-
-    audio_pack_buffer = pb_init(bsize);
 
     byte *write_buffer = malloc(bsize);
     if (!write_buffer)
         fatal("malloc");
 
+    audio_pack_buffer = pb_init(bsize);
+
     uint64_t psize;
+    struct audio_pack *pack;
+    size_t read_length;
 
     while (true) {
         read_length = receive_pack(socket_fd, &pack, buffer, &psize,
