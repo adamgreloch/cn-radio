@@ -48,4 +48,10 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
  */
 void pb_pop_front(pack_buffer *pb, void *item, uint64_t psize);
 
+/**
+ * Returns the number of packs in the pack buffer
+ * @param pb - pointer to pack buffer
+ */
+uint64_t pb_count(pack_buffer *pb);
+
 #endif //_PACK_BUFFER_
