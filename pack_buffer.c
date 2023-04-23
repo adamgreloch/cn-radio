@@ -152,18 +152,23 @@ handle_buffer_overflow(pack_buffer *pb, uint64_t missing, const byte *pack) {
 
 void insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
                              const byte *pack) {
-    // Reserve space for missing packs, if there are any (if missing > 0).
+    // How many space to reserve in bytes for missing packs, if any.
+    // Overflow warning: first_byte_num may be less than pb->head_byte_num.
     uint64_t missing = first_byte_num - pb->head_byte_num;
 
-    if (missing > pb->capacity) {
+    if (pb->head_byte_num > first_byte_num) {
+        if (pb->head_byte_num - first_byte_num < pb->capacity) {
+            // Encountered a missing or duplicated pack.
+            add_pack_if_new(pb, pb->head - pb->head_byte_num + first_byte_num,
+                            pack);
+        } // else: Encountered a missing, but ancient package... ignore.
+    } else if (missing > pb->capacity) {
         // This won't fit. Reset the buffer.
         missing = (pb->capacity / pb->psize - 1) * pb->psize;
         pb_reset(pb, pb->psize, first_byte_num - missing);
         add_pack_if_new(pb, pb->head + missing, pack);
         pb->head = pb->head + missing + pb->psize;
-    }
-
-    if (pb->head + missing >= pb->buf_end)
+    } else if (pb->head + missing >= pb->buf_end)
         // Buffer overflow.
         handle_buffer_overflow(pb, missing, pack);
     else {
@@ -171,36 +176,30 @@ void insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
         add_pack_if_new(pb, pb->head + missing, pack);
         pb->head = pb->head + missing + pb->psize;
     }
+
+    pb->head_byte_num = first_byte_num + pb->psize;
+    handle_buf_end_overlap(&pb->head, pb);
+}
+
+bool is_in_buffer(pack_buffer *pb, uint64_t first_byte_num) {
+    if (pb->head_byte_num <= first_byte_num) return false;
+    uint64_t head_pos = pb->head - pb->buf;
+    uint64_t dist_from_head = pb->head_byte_num - first_byte_num;
+
+    return pb->is_present[head_pos - dist_from_head];
 }
 
 void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
                   uint64_t psize) {
-    if (pb->psize != psize) fatal(psize_errmsg);
-    if (pb->is_present[pb->head + first_byte_num - pb->head_byte_num - pb->buf])
-        return;
+    if (pb->psize != psize) return;
+    if (is_in_buffer(pb, first_byte_num)) return;
 
     find_missing(pb, first_byte_num);
-
-    if (pb->head_byte_num > first_byte_num) {
-        if (pb->head_byte_num - first_byte_num < pb->capacity) {
-            // Encountered a missing or duplicated pack.
-            add_pack_if_new(pb, pb->head - pb->head_byte_num + first_byte_num,
-                            pack);
-            return;
-        } else
-            // Encountered a missing, but ancient package... ignore.
-            return;
-    }
-
     insert_pack_into_buffer(pb, first_byte_num, pack);
-
-    pb->head_byte_num = first_byte_num + pb->psize;
-
-    handle_buf_end_overlap(&pb->head, pb);
 }
 
 void pb_pop_front(pack_buffer *pb, void *item, uint64_t psize) {
-    if (pb->psize != psize) fatal(psize_errmsg);
+    if (pb->psize != psize) return;
 
     if (pb->count == 0) {
         // Buffer is depleted. We will wait for it to fill up to approx. 75%
