@@ -12,7 +12,7 @@ void insert_pack(pack_buffer *pb, uint8_t num, uint64_t psize) {
 }
 
 uint8_t get_pop_result(pack_buffer *pb, uint64_t psize) {
-    pb_pop_front(pb, res, psize);
+    pb_pop_front(pb, res);
     return res[0];
 }
 
@@ -51,7 +51,7 @@ int main() {
 
     // Overflow expected. There should be just pack 7 in the buffer, since
     // new head points to space occupied previously by 6.
-    pb_pop_front(pb, res, psize);
+    pb_pop_front(pb, res);
     assert(res[0] == 7);
 
     pb_reset(pb, psize, 0);

@@ -1,4 +1,5 @@
 #include "pack_buffer.h"
+#include <pthread.h>
 
 struct pack_buffer {
     byte *buf;                                        /**< data buffer */
@@ -13,6 +14,10 @@ struct pack_buffer {
     uint64_t head_byte_num;                /**< first_byte_num of head */
     uint64_t byte_zero;                   /**< current session's byte0 */
     byte *tail;                                   /**< pointer to tail */
+
+    pthread_mutex_t mutex;
+    pthread_cond_t byte_zero_wait;
+    pthread_cond_t full_wait;
 };
 
 pack_buffer *pb_init(uint64_t bsize) {
@@ -30,19 +35,28 @@ pack_buffer *pb_init(uint64_t bsize) {
     pb->head = pb->tail = pb->buf;
     pb->head_byte_num = pb->byte_zero = 0;
 
+    CHECK_ERRNO(pthread_mutex_init(&pb->mutex, NULL));
+    CHECK_ERRNO(pthread_cond_init(&pb->byte_zero_wait, NULL));
+    CHECK_ERRNO(pthread_cond_init(&pb->full_wait, NULL));
+
     return pb;
 }
 
 void pb_reset(pack_buffer *pb, uint64_t psize, uint64_t byte_zero) {
+    CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
+
     memset(pb->buf, 0, pb->capacity);
     memset(pb->is_present, 0, pb->capacity);
 
     pb->buf_end = (byte *) pb->buf + pb->capacity;
     pb->psize = psize;
+
     pb->count = 0;
 
     pb->head_byte_num = pb->byte_zero = byte_zero;
     pb->head = pb->tail = pb->buf;
+
+    CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 }
 
 void handle_buf_end_overlap(byte **pos, pack_buffer *pb) {
@@ -157,8 +171,12 @@ void insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
     if (pb->head_byte_num > first_byte_num) {
         if (pb->head_byte_num - first_byte_num < pb->capacity) {
             // Encountered a missing or duplicated pack.
-            add_pack_if_new(pb, pb->head - pb->head_byte_num + first_byte_num,
-                            pack);
+            byte *ptr = pb->head - pb->head_byte_num + first_byte_num;
+
+            if (ptr < pb->buf)
+                ptr += pb->capacity;
+
+            add_pack_if_new(pb, ptr, pack);
         } // else: Encountered a missing, but ancient package... ignore.
     } else if (missing > pb->capacity) {
         // This won't fit. Reset the buffer.
@@ -191,32 +209,56 @@ bool is_in_buffer(pack_buffer *pb, uint64_t first_byte_num) {
 void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
                   uint64_t psize) {
     if (pb->psize != psize) return;
-    if (is_in_buffer(pb, first_byte_num)) return;
+    CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
 
-    find_missing(pb, first_byte_num);
-    insert_pack_into_buffer(pb, first_byte_num, pack);
-}
+    while (pb->capacity < (pb->count + 1) * pb->psize)
+        // handle full buffer
+        CHECK_ERRNO(pthread_cond_wait(&pb->full_wait, &pb->mutex));
 
-void pb_pop_front(pack_buffer *pb, void *item, uint64_t psize) {
-    if (pb->psize != psize) return;
-
-    if (pb->count == 0) {
-        // Buffer is depleted. We will wait for it to fill up to approx. 75%
-        // to avoid unstable playback.
-        pb->byte_zero = pb->head_byte_num;
-        return;
+    if (!is_in_buffer(pb, first_byte_num)) {
+        find_missing(pb, first_byte_num);
+        insert_pack_into_buffer(pb, first_byte_num, pack);
     }
 
-    if (pb->head_byte_num - pb->byte_zero < pb->capacity / 4 * 3)
-        // Stop playback until (BYTE0 + 3/4 * PSIZE)'th byte received.
-        return;
+    if (pb->head_byte_num - pb->byte_zero >= pb->capacity / 4 * 3)
+        CHECK_ERRNO(pthread_cond_signal(&pb->byte_zero_wait));
 
-    memcpy(item, pb->tail, psize);
-    pb->is_present[pb->tail - pb->buf] = false;
-    pb->tail = (byte *) pb->tail + psize;
-    pb->count--;
+    CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
+}
 
+void take_pack_if_present(pack_buffer *pb, void *item) {
+    if (pb->is_present[pb->tail - pb->buf]) {
+        memcpy(item, pb->tail, pb->psize);
+        pb->is_present[pb->tail - pb->buf] = false;
+        pb->count--;
+    }
+    pb->tail += pb->psize;
     handle_buf_end_overlap(&pb->tail, pb);
+}
+
+uint64_t pb_pop_front(pack_buffer *pb, void *item) {
+    CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
+
+    while (pb->count == 0 ||
+           pb->head_byte_num - pb->byte_zero < pb->capacity / 4 * 3) {
+        if (pb->count == 0)
+            // Buffer is depleted. We will wait for it to fill up
+            // to approx. 75% to avoid unstable playback.
+            pb->byte_zero = pb->head_byte_num;
+        // else: Stop playback until (BYTE0 + 3/4 * PSIZE)'th byte received.
+        CHECK_ERRNO(pthread_cond_wait(&pb->byte_zero_wait, &pb->mutex));
+    }
+
+    take_pack_if_present(pb, item);
+
+    if (pb->capacity >= (pb->count + 1) * pb->psize)
+        CHECK_ERRNO(pthread_cond_signal(&pb->full_wait));
+
+    uint64_t curr_psize = pb->psize;
+
+    CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
+
+    return curr_psize;
 }
 
 uint64_t pb_count(pack_buffer *pb) {

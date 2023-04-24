@@ -40,16 +40,17 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
 
 /**
  * Pops oldest pack from the pack buffer @p pb and stores it in @p item.
- * Throws a fatal error in case @p psize differs from psize of @p pb pack
- * buffer.
+ * Blocks if pack buffer @p pb is not yet initialized, otherwise
+ * non-blocking. If unable to take a pack from the buffer, it doesn't modify @p
+ * item.
  * @param pb - pointer to pack buffer
  * @param item - result buffer
- * @param psize - expected size of pack in bytes
+ * @returns psize of back buffer @p pb
  */
-void pb_pop_front(pack_buffer *pb, void *item, uint64_t psize);
+uint64_t pb_pop_front(pack_buffer *pb, void *item);
 
 /**
- * Returns the number of packs in the pack buffer
+ * Returns the number of packs in the pack buffer. Thread unsafe.
  * @param pb - pointer to pack buffer
  */
 uint64_t pb_count(pack_buffer *pb);
