@@ -1,20 +1,18 @@
 #include "pack_buffer.h"
 
-char *psize_errmsg = "psize arg doesn't match buffer's psize";
-
 struct pack_buffer {
-    byte *buf;         /**< data buffer */
-    byte *buf_end;     /**< end of data buffer */
+    byte *buf;                                        /**< data buffer */
+    byte *buf_end;                             /**< end of data buffer */
 
-    bool *is_present;  /**< indicates whether i-th pack is present or missing */
+    bool *is_present;    /**< indicates whether i-th pack is in buffer */
 
-    uint64_t capacity;   /**< maximum number of items in the buffer */
+    uint64_t capacity;      /**< maximum number of items in the buffer */
     uint64_t psize;
-    uint64_t count;      /**< number of items in the buffer */
-    byte *head;        /**< pointer to head */
-    uint64_t head_byte_num; /**< first_byte_num of head */
-    uint64_t byte_zero;     /**< current session's byte0 */
-    byte *tail;        /**< pointer to tail */
+    uint64_t count;                 /**< number of items in the buffer */
+    byte *head;                                   /**< pointer to head */
+    uint64_t head_byte_num;                /**< first_byte_num of head */
+    uint64_t byte_zero;                   /**< current session's byte0 */
+    byte *tail;                                   /**< pointer to tail */
 };
 
 pack_buffer *pb_init(uint64_t bsize) {
@@ -183,6 +181,7 @@ void insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
 
 bool is_in_buffer(pack_buffer *pb, uint64_t first_byte_num) {
     if (pb->head_byte_num <= first_byte_num) return false;
+
     uint64_t head_pos = pb->head - pb->buf;
     uint64_t dist_from_head = pb->head_byte_num - first_byte_num;
 
