@@ -25,10 +25,11 @@ size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
     memset(buffer, 0, bsize);
     read_length = recv(socket_fd, buffer, bsize, flags);
 
-    *psize = read_length - sizeof(struct audio_pack);
+    *psize = read_length - 16;
 
-    *pack = (struct audio_pack *) buffer;
-    (*pack)->audio_data = buffer + sizeof(struct audio_pack);
+    memcpy(&(*pack)->session_id, buffer, 8);
+    memcpy(&(*pack)->first_byte_num, buffer + 8, 8);
+    (*pack)->audio_data = buffer + 16;
 
     curr_session_id = ntohll((*pack)->session_id);
 
@@ -46,7 +47,7 @@ size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
 void *pack_receiver() {
     uint64_t psize;
 
-    struct audio_pack *pack;
+    struct audio_pack *pack = malloc(sizeof(struct audio_pack));
     size_t read_length;
 
     int socket_fd = bind_socket(port);
