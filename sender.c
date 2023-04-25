@@ -18,8 +18,9 @@ void send_pack(int socket_fd, const struct sockaddr_in *dest_address,
 
     byte *packet = malloc(data_size);
 
-    memcpy(packet, pack, sizeof(struct audio_pack));
-    memcpy(packet + sizeof(struct audio_pack), pack->audio_data, psize);
+    memcpy(packet, &pack->session_id, sizeof(uint64_t));
+    memcpy(packet + sizeof(uint64_t), &pack->first_byte_num, sizeof(uint64_t));
+    memcpy(packet + 2 * sizeof(uint64_t), pack->audio_data, psize);
 
     ssize_t sent_size = sendto(socket_fd, packet, data_size, flags,
                                (struct sockaddr *) dest_address,

@@ -1,5 +1,8 @@
 #include "pack_buffer.h"
 #include <pthread.h>
+#include <assert.h>
+
+const char missing_fmt[] = "MISSING: BEFORE %lu EXPECTED %lu\n";
 
 struct pack_buffer {
     byte *buf;                                        /**< data buffer */
@@ -10,10 +13,12 @@ struct pack_buffer {
     uint64_t capacity;      /**< maximum number of items in the buffer */
     uint64_t psize;
     uint64_t count;                 /**< number of items in the buffer */
-    byte *head;                                   /**< pointer to head */
+    byte *head;                            /**< pointer to buffer head */
     uint64_t head_byte_num;                /**< first_byte_num of head */
     uint64_t byte_zero;                   /**< current session's byte0 */
-    byte *tail;                                   /**< pointer to tail */
+    byte *tail;                            /**< pointer to buffer tail */
+
+    char *stderr_buf;
 
     pthread_mutex_t mutex;
     pthread_cond_t byte_zero_wait;
@@ -34,6 +39,8 @@ pack_buffer *pb_init(uint64_t bsize) {
     pb->count = 0;
     pb->head = pb->tail = pb->buf;
     pb->head_byte_num = pb->byte_zero = 0;
+
+    pb->stderr_buf = malloc(bsize * sizeof(missing_fmt) * sizeof(char));
 
     CHECK_ERRNO(pthread_mutex_init(&pb->mutex, NULL));
     CHECK_ERRNO(pthread_cond_init(&pb->byte_zero_wait, NULL));
@@ -76,6 +83,10 @@ void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
     uint64_t missing_byte_num;
     uint64_t shift = 0;
 
+    memset(pb->stderr_buf, 0, pb->capacity * sizeof(missing_fmt) * sizeof
+            (char));
+    uint64_t written = 0;
+
     while (pos != pb->head) {
         if (!pb->is_present[pos - pb->buf]) {
             if (pos >= pb->head)
@@ -85,9 +96,11 @@ void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
 
             missing_byte_num = pb->head_byte_num - (pb->head - shift - pos);
 
-            if (missing_byte_num < first_byte_num)
-                fprintf(stderr, "MISSING: BEFORE %lu EXPECTED %lu\n",
-                        first_byte_num, missing_byte_num);
+            if (missing_byte_num < first_byte_num &&
+                missing_byte_num > pb->byte_zero)
+                written += sprintf(pb->stderr_buf + written, missing_fmt,
+                                   first_byte_num / pb->psize,
+                                   missing_byte_num / pb->psize);
         }
 
         pos += pb->psize;
@@ -96,15 +109,19 @@ void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
             handle_buf_end_overlap(&pos, pb);
     }
 
-    // Print packet numbers that are definitely missing - from range
-    // head_byte_num to first_byte_num.
-    uint64_t byte_num = pb->head_byte_num;
+    if (pb->head_byte_num < first_byte_num) {
+        // Print packet numbers that are definitely missing - from range
+        // head_byte_num to first_byte_num.
+        uint64_t byte_num = pb->head_byte_num;
 
-    while (byte_num < first_byte_num) {
-        fprintf(stderr, "MISSING: BEFORE %lu EXPECTED %lu\n",
-                first_byte_num, byte_num);
-        byte_num += pb->psize;
+        while (byte_num < first_byte_num) {
+            written += sprintf(pb->stderr_buf + written, missing_fmt,
+                               first_byte_num / pb->psize, byte_num / pb->psize);
+            byte_num += pb->psize;
+        }
     }
+
+    fprintf(stderr, "%s", pb->stderr_buf);
 }
 
 /**
@@ -117,6 +134,7 @@ void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
 void wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
     memset(ptr, 0, bytes);
     uint64_t pos = ptr - pb->buf;
+    assert(pos % pb->psize == 0);
     for (size_t i = 0; i < bytes; i += pb->psize)
         if (pb->is_present[pos + i]) {
             pb->count--;
@@ -124,14 +142,11 @@ void wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
         }
 }
 
-void add_pack_if_new(pack_buffer *pb, byte *ptr, const byte *pack) {
-    uint64_t pos = ptr - pb->buf;
-
-    if (!pb->is_present[pos]) {
-        memcpy(ptr, pack, pb->psize);
-        pb->count++;
-        pb->is_present[ptr - pb->buf] = true;
-    }
+void add_pack(pack_buffer *pb, byte *ptr, const byte *pack) {
+    assert(!pb->is_present[ptr - pb->buf]);
+    memcpy(ptr, pack, pb->psize);
+    pb->count++;
+    pb->is_present[ptr - pb->buf] = true;
 }
 
 void
@@ -151,15 +166,23 @@ handle_buffer_overflow(pack_buffer *pb, uint64_t missing, const byte *pack) {
     wipe_buffer(pb, pb->buf, missing - packs_to_end * pb->psize + pb->psize);
 
     // Place the pack in its new spot.
+    byte *prev_head = pb->head;
+
     pb->head = pb->buf + missing - packs_to_end * pb->psize;
-    add_pack_if_new(pb, pb->head, pack);
+    add_pack(pb, pb->head, pack);
     pb->head += pb->psize;
 
-    if (pb->head >= pb->tail) {
+    if (pb->head >= pb->tail && prev_head >= pb->tail
+        || pb->head <= pb->tail && prev_head <= pb->tail) {
         // Head overlapped the tail.
         pb->tail = pb->head + pb->psize;
         handle_buf_end_overlap(&pb->tail, pb);
     }
+}
+
+uint64_t range(pack_buffer *pb) {
+    if (pb->tail <= pb->head) return pb->head - pb->tail;
+    else return pb->capacity + pb->head - pb->tail;
 }
 
 void insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
@@ -169,27 +192,35 @@ void insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
     uint64_t missing = first_byte_num - pb->head_byte_num;
 
     if (pb->head_byte_num > first_byte_num) {
-        if (pb->head_byte_num - first_byte_num < pb->capacity) {
-            // Encountered a missing or duplicated pack.
+        // Encountered a missing pack.
+        if (pb->head_byte_num - first_byte_num <= range(pb)) {
             byte *ptr = pb->head - pb->head_byte_num + first_byte_num;
 
-            if (ptr < pb->buf)
-                ptr += pb->capacity;
+            if (ptr < pb->buf) // Left overlap
+                ptr += pb->capacity / pb->psize * pb->psize;
 
-            add_pack_if_new(pb, ptr, pack);
+            add_pack(pb, ptr, pack);
         } // else: Encountered a missing, but ancient package... ignore.
+        return;
     } else if (missing > pb->capacity) {
         // This won't fit. Reset the buffer.
         missing = (pb->capacity / pb->psize - 1) * pb->psize;
         pb_reset(pb, pb->psize, first_byte_num - missing);
-        add_pack_if_new(pb, pb->head + missing, pack);
+        add_pack(pb, pb->head + missing, pack);
         pb->head = pb->head + missing + pb->psize;
     } else if (pb->head + missing >= pb->buf_end)
         // Buffer overflow.
         handle_buffer_overflow(pb, missing, pack);
     else {
-        // Nothing to worry about.
-        add_pack_if_new(pb, pb->head + missing, pack);
+        if (pb->head < pb->tail && pb->tail <= pb->head + missing + pb->psize) {
+            // Tail overlap.
+            wipe_buffer(pb, pb->head, missing + 2 * pb->psize);
+            pb->tail = pb->head + missing + 2 * pb->psize;
+            handle_buf_end_overlap(&pb->tail, pb);
+        }
+
+        // Insert normally.
+        add_pack(pb, pb->head + missing, pack);
         pb->head = pb->head + missing + pb->psize;
     }
 
@@ -198,7 +229,7 @@ void insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
 }
 
 bool is_in_buffer(pack_buffer *pb, uint64_t first_byte_num) {
-    if (pb->head_byte_num <= first_byte_num) return false;
+    if (pb->head_byte_num < first_byte_num) return false;
 
     uint64_t head_pos = pb->head - pb->buf;
     uint64_t dist_from_head = pb->head_byte_num - first_byte_num;
@@ -232,16 +263,19 @@ void take_pack_if_present(pack_buffer *pb, void *item) {
         pb->is_present[pb->tail - pb->buf] = false;
         pb->count--;
     }
-    pb->tail += pb->psize;
-    handle_buf_end_overlap(&pb->tail, pb);
+
+    if (pb->head != pb->tail) {
+        pb->tail += pb->psize;
+        handle_buf_end_overlap(&pb->tail, pb);
+    }
 }
 
 uint64_t pb_pop_front(pack_buffer *pb, void *item) {
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
 
-    while (pb->count == 0 ||
+    while (pb->head == pb->tail ||
            pb->head_byte_num - pb->byte_zero < pb->capacity / 4 * 3) {
-        if (pb->count == 0)
+        if (pb->head == pb->tail)
             // Buffer is depleted. We will wait for it to fill up
             // to approx. 75% to avoid unstable playback.
             pb->byte_zero = pb->head_byte_num;
