@@ -136,10 +136,8 @@ void wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
 }
 
 void add_pack(pack_buffer *pb, byte *ptr, const byte *pack) {
-    if (!pb->is_present[ptr - pb->buf]) {
-        memcpy(ptr, pack, pb->psize);
-        pb->is_present[ptr - pb->buf] = true;
-    }
+    memcpy(ptr, pack, pb->psize);
+    pb->is_present[ptr - pb->buf] = true;
 }
 
 void
@@ -226,6 +224,8 @@ bool is_in_buffer(pack_buffer *pb, uint64_t first_byte_num) {
 
     uint64_t head_pos = pb->head - pb->buf;
     uint64_t dist_from_head = pb->head_byte_num - first_byte_num;
+
+    if (head_pos < dist_from_head) return false;
 
     return pb->is_present[head_pos - dist_from_head];
 }
