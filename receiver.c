@@ -1,4 +1,5 @@
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -14,7 +15,7 @@ uint64_t last_session_id = 0;
 pack_buffer *audio_pack_buffer;
 uint16_t port;
 uint64_t bsize;
-char *from_addr;
+in_addr_t from_addr;
 
 size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
                     uint64_t *psize) {
@@ -23,7 +24,14 @@ size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
     errno = 0;
 
     memset(buffer, 0, bsize);
-    read_length = recv(socket_fd, buffer, bsize, flags);
+
+    struct sockaddr_in client_address;
+    socklen_t address_length = (socklen_t) sizeof(client_address);
+
+    read_length = recvfrom(socket_fd, buffer, bsize, flags, (struct sockaddr
+    *) &client_address, &address_length);
+
+    if (client_address.sin_addr.s_addr != from_addr) return 0;
 
     *psize = read_length - 16;
 
@@ -84,7 +92,7 @@ int main(int argc, char **argv) {
 
     port = opts->port;
     bsize = opts->bsize;
-    from_addr = opts->from_addr;
+    from_addr = inet_addr(opts->from_addr);
 
     audio_pack_buffer = pb_init(bsize);
 
