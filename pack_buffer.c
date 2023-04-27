@@ -78,8 +78,7 @@ void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
     uint64_t missing_byte_num;
     uint64_t shift = 0;
 
-    memset(pb->stderr_buf, 0, pb->capacity * sizeof(missing_fmt) * sizeof
-            (char));
+    pb->stderr_buf[0] = '\0';
     uint64_t written = 0;
 
     while (pos != pb->head) {
