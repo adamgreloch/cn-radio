@@ -12,7 +12,6 @@ struct pack_buffer {
 
     uint64_t capacity;      /**< maximum number of items in the buffer */
     uint64_t psize;
-    uint64_t count;                 /**< number of items in the buffer */
     byte *head;                            /**< pointer to buffer head */
     uint64_t head_byte_num;                /**< first_byte_num of head */
     uint64_t byte_zero;                   /**< current session's byte0 */
@@ -22,12 +21,10 @@ struct pack_buffer {
 
     pthread_mutex_t mutex;
     pthread_cond_t byte_zero_wait;
-    pthread_cond_t full_wait;
 };
 
 pack_buffer *pb_init(uint64_t bsize) {
     pack_buffer *pb = malloc(sizeof(pack_buffer));
-
     pb->buf = malloc(bsize);
     if (pb->buf == NULL)
         fatal("malloc");
@@ -36,7 +33,6 @@ pack_buffer *pb_init(uint64_t bsize) {
     pb->buf_end = (byte *) pb->buf + bsize;
     pb->capacity = bsize;
     pb->psize = 0;
-    pb->count = 0;
     pb->head = pb->tail = pb->buf;
     pb->head_byte_num = pb->byte_zero = 0;
 
@@ -44,25 +40,24 @@ pack_buffer *pb_init(uint64_t bsize) {
 
     CHECK_ERRNO(pthread_mutex_init(&pb->mutex, NULL));
     CHECK_ERRNO(pthread_cond_init(&pb->byte_zero_wait, NULL));
-    CHECK_ERRNO(pthread_cond_init(&pb->full_wait, NULL));
 
     return pb;
 }
 
-void pb_reset(pack_buffer *pb, uint64_t psize, uint64_t byte_zero) {
-    CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
-
+void reset_buffer(pack_buffer *pb, uint64_t byte_zero) {
     memset(pb->buf, 0, pb->capacity);
     memset(pb->is_present, 0, pb->capacity);
 
     pb->buf_end = (byte *) pb->buf + pb->capacity;
-    pb->psize = psize;
-
-    pb->count = 0;
 
     pb->head_byte_num = pb->byte_zero = byte_zero;
     pb->head = pb->tail = pb->buf;
+}
 
+void pb_reset(pack_buffer *pb, uint64_t psize, uint64_t byte_zero) {
+    CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
+    reset_buffer(pb, byte_zero);
+    pb->psize = psize;
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 }
 
@@ -137,16 +132,15 @@ void wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
     assert(pos % pb->psize == 0);
     for (size_t i = 0; i < bytes; i += pb->psize)
         if (pb->is_present[pos + i]) {
-            pb->count--;
             pb->is_present[pos + i] = false;
         }
 }
 
 void add_pack(pack_buffer *pb, byte *ptr, const byte *pack) {
-    assert(!pb->is_present[ptr - pb->buf]);
-    memcpy(ptr, pack, pb->psize);
-    pb->count++;
-    pb->is_present[ptr - pb->buf] = true;
+    if (!pb->is_present[ptr - pb->buf]) {
+        memcpy(ptr, pack, pb->psize);
+        pb->is_present[ptr - pb->buf] = true;
+    }
 }
 
 void
@@ -205,7 +199,7 @@ void insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
     } else if (missing > pb->capacity) {
         // This won't fit. Reset the buffer.
         missing = (pb->capacity / pb->psize - 1) * pb->psize;
-        pb_reset(pb, pb->psize, first_byte_num - missing);
+        reset_buffer(pb, first_byte_num - missing);
         add_pack(pb, pb->head + missing, pack);
         pb->head = pb->head + missing + pb->psize;
     } else if (pb->head + missing >= pb->buf_end)
@@ -242,10 +236,6 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
     if (pb->psize != psize) return;
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
 
-    while (pb->capacity < (pb->count + 1) * pb->psize)
-        // handle full buffer
-        CHECK_ERRNO(pthread_cond_wait(&pb->full_wait, &pb->mutex));
-
     if (!is_in_buffer(pb, first_byte_num)) {
         find_missing(pb, first_byte_num);
         insert_pack_into_buffer(pb, first_byte_num, pack);
@@ -261,7 +251,6 @@ void take_pack_if_present(pack_buffer *pb, void *item) {
     if (pb->is_present[pb->tail - pb->buf]) {
         memcpy(item, pb->tail, pb->psize);
         pb->is_present[pb->tail - pb->buf] = false;
-        pb->count--;
     }
 
     if (pb->head != pb->tail) {
@@ -285,17 +274,9 @@ uint64_t pb_pop_front(pack_buffer *pb, void *item) {
 
     take_pack_if_present(pb, item);
 
-    if (pb->capacity >= (pb->count + 1) * pb->psize)
-        CHECK_ERRNO(pthread_cond_signal(&pb->full_wait));
-
     uint64_t curr_psize = pb->psize;
 
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 
     return curr_psize;
 }
-
-uint64_t pb_count(pack_buffer *pb) {
-    return pb->count;
-}
-
