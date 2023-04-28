@@ -55,7 +55,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
 
     opterr = 0;
 
-    while ((c = getopt(argc, argv, "a:b:P:")) != -1) {
+    while ((c = getopt(argc, argv, "a:n:p:P:")) != -1) {
         switch (c) {
             case 'a':
                 aflag = 1;

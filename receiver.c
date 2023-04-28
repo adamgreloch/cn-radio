@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
 
     port = opts->port;
     bsize = opts->bsize;
-    from_addr = inet_addr(opts->from_addr);
+    from_addr = check_address(opts->from_addr);
 
     audio_pack_buffer = pb_init(bsize);
 

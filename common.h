@@ -1,6 +1,7 @@
 #ifndef _COMMON_
 #define _COMMON_
 
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <stddef.h>
 #include <netdb.h>
@@ -72,6 +73,16 @@ inline static uint64_t ntohll(uint64_t x) {
 #else
     return ((uint64_t) ntohl((x) & 0xFFFFFFFFLL) << 32) | ntohl((x) >> 32);
 #endif
+}
+
+inline static in_addr_t check_address(char* addr) {
+    in_addr_t in_addr;
+    int res = inet_pton(AF_INET, addr, &in_addr);
+    if (res == -1)
+        fatal("Failed to interpret address: %s", addr);
+    else if (res == 0)
+        fatal("Not a correct IPv4 address: %s", addr);
+    return in_addr;
 }
 
 #endif //_COMMON_

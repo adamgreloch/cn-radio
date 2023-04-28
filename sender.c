@@ -36,6 +36,8 @@ int main(int argc, char **argv) {
 
     uint16_t port = opts->port;
     uint32_t psize = opts->psize;
+
+    check_address(opts->dest_addr);
     char *dest_addr = opts->dest_addr;
 
     int socket_fd = socket(PF_INET, SOCK_DGRAM, 0);
