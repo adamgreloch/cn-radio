@@ -76,7 +76,7 @@ void *pack_receiver() {
 void *pack_printer() {
     byte *write_buffer = malloc(bsize);
     if (!write_buffer)
-        fatal("calloc");
+        fatal("malloc");
 
     uint64_t psize;
 

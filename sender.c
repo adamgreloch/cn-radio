@@ -14,7 +14,7 @@ void send_pack(int socket_fd, const struct sockaddr_in *dest_address,
     socklen_t address_length = (socklen_t) sizeof(*dest_address);
     int flags = 0;
 
-    uint64_t data_size = psize + 16;
+    ssize_t data_size = psize + 16;
 
     byte *packet = malloc(data_size);
 

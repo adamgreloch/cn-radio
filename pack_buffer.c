@@ -17,7 +17,7 @@ struct pack_buffer {
     uint64_t byte_zero;                   /**< current session's byte0 */
     byte *tail;                            /**< pointer to buffer tail */
 
-    char *stderr_buf;
+    char *stderr_buf;            /**< buffer used for stderr printouts */
 
     pthread_mutex_t mutex;
     pthread_cond_t byte_zero_wait;
@@ -25,6 +25,7 @@ struct pack_buffer {
 
 pack_buffer *pb_init(uint64_t bsize) {
     pack_buffer *pb = malloc(sizeof(pack_buffer));
+
     pb->buf = malloc(bsize);
     if (pb->buf == NULL)
         fatal("malloc");
@@ -49,7 +50,6 @@ void reset_buffer(pack_buffer *pb, uint64_t byte_zero) {
     memset(pb->is_present, 0, pb->capacity);
 
     pb->buf_end = (byte *) pb->buf + pb->capacity;
-
     pb->head_byte_num = pb->byte_zero = byte_zero;
     pb->head = pb->tail = pb->buf;
 }
@@ -129,10 +129,7 @@ void wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
     memset(ptr, 0, bytes);
     uint64_t pos = ptr - pb->buf;
     assert(pos % pb->psize == 0);
-    for (size_t i = 0; i < bytes; i += pb->psize)
-        if (pb->is_present[pos + i]) {
-            pb->is_present[pos + i] = false;
-        }
+    memset(pb->is_present + pos, 0, bytes);
 }
 
 void add_pack(pack_buffer *pb, byte *ptr, const byte *pack) {
@@ -163,8 +160,8 @@ handle_buffer_overflow(pack_buffer *pb, uint64_t missing, const byte *pack) {
     add_pack(pb, pb->head, pack);
     pb->head += pb->psize;
 
-    if (pb->head >= pb->tail && prev_head >= pb->tail
-        || pb->head <= pb->tail && prev_head <= pb->tail) {
+    if ((pb->head >= pb->tail && prev_head >= pb->tail)
+        || (pb->head <= pb->tail && prev_head <= pb->tail)) {
         // Head overlapped the tail.
         pb->tail = pb->head + pb->psize;
         handle_buf_end_overlap(&pb->tail, pb);

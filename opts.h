@@ -49,10 +49,6 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
     opts->sender_name = DEFAULT_NAME;
 
     int aflag = 0;
-    int pflag = 0;
-    int Pflag = 0;
-    int nflag = 0;
-
     int errflag = 0;
 
     int c;
@@ -66,11 +62,9 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
                 opts->dest_addr = optarg;
                 break;
             case 'n':
-                nflag = 1;
                 opts->sender_name = optarg;
                 break;
             case 'p':
-                pflag = 1;
                 opts->psize = strtoul(optarg, NULL, 10);
                 if (opts->psize == 0) {
                     fprintf(stderr, "Invalid audio_pack size: %s\n", optarg);
@@ -78,7 +72,6 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
                 }
                 break;
             case 'P':
-                Pflag = 1;
                 opts->port = strtoul(optarg, NULL, 10);
                 if (opts->port < 1024) {
                     fprintf(stderr, "Invalid or illegal port number: %s\n",
@@ -125,8 +118,6 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
     opts->port = DEFAULT_PORT;
 
     int aflag = 0;
-    int bflag = 0;
-    int Pflag = 0;
 
     int errflag = 0;
 
@@ -141,7 +132,6 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 opts->from_addr = optarg;
                 break;
             case 'b':
-                bflag = 1;
                 opts->bsize = strtoul(optarg, NULL, 10);
                 if (opts->bsize == 0) {
                     fprintf(stderr, "Invalid buffer size: %s\n", optarg);
@@ -149,7 +139,6 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 }
                 break;
             case 'P':
-                Pflag = 1;
                 opts->port = strtoul(optarg, NULL, 10);
                 if (opts->port < 1024) {
                     fprintf(stderr, "Invalid or illegal port number: %s\n",
