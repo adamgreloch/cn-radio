@@ -44,6 +44,8 @@ int main(int argc, char **argv) {
 
     struct sockaddr_in server_address = get_send_address(dest_addr, port);
 
+    enable_multicast(socket_fd, &server_address);
+
     uint64_t session_id = time(NULL);
 
     uint64_t pack_num = 0;

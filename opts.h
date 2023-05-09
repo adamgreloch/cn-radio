@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <ctype.h>
 
 #define DEFAULT_PSIZE 512
@@ -16,7 +17,7 @@ struct sender_opts {
     /** address of targeted receiver (set with option -a, obligatory) */
     char *dest_addr;
 
-    /** receiver's port (set with option -P) defaults to @p DEFAULT_PORT */
+    /** data port (set with option -P) defaults to @p DEFAULT_PORT */
     uint16_t port;
 
     /** audio_data size (set with -p) defaults to @p DEFAULT_PSIZE */
@@ -29,10 +30,15 @@ struct sender_opts {
 typedef struct sender_opts sender_opts;
 
 struct receiver_opts {
-    /** address of whitelisted sender (set with option -a, obligatory) */
+    /** address of whitelisted sender
+     * set with option -a, obligatory
+     */
     char *from_addr;
 
-    /** receiver's port (set with option -P) defaults to @p DEFAULT_PORT */
+    /** data port
+     * set with option -P, defaults to @p DEFAULT_PORT
+     */
+    char portstr[12];
     uint16_t port;
 
     /** buffer size (set with -b) defaults to @p DEFAULT_BSIZE */
@@ -115,7 +121,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
     receiver_opts *opts = malloc(sizeof(receiver_opts));
 
     opts->bsize = DEFAULT_BSIZE;
-    opts->port = DEFAULT_PORT;
+    sprintf(opts->portstr, "%d", DEFAULT_PORT);
 
     int aflag = 0;
 
@@ -139,12 +145,12 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 }
                 break;
             case 'P':
-                opts->port = strtoul(optarg, NULL, 10);
-                if (opts->port < 1024) {
+                if ((opts->port = strtoul(optarg, NULL, 10)) < 1024) {
                     fprintf(stderr, "Invalid or illegal port number: %s\n",
                             optarg);
                     errflag = 1;
-                }
+                } else
+                    memcpy(opts->portstr, optarg, sizeof(opts->port));
                 break;
             case '?':
                 if (optopt == 'a' || optopt == 'b' || optopt == 'P')

@@ -15,7 +15,7 @@ uint64_t last_session_id = 0;
 pack_buffer *audio_pack_buffer;
 uint16_t port;
 uint64_t bsize;
-in_addr_t from_addr;
+struct sockaddr_in listening_address;
 
 size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
                     uint64_t *psize) {
@@ -31,7 +31,7 @@ size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
     read_length = recvfrom(socket_fd, buffer, bsize, flags, (struct sockaddr
     *) &client_address, &address_length);
 
-    if (client_address.sin_addr.s_addr != from_addr) return 0;
+    // FIXME radio stations may interfere on one multicast address
 
     *psize = read_length - 16;
 
@@ -59,6 +59,8 @@ void *pack_receiver() {
     size_t read_length;
 
     int socket_fd = bind_socket(port);
+
+    enable_multicast(socket_fd, &listening_address);
 
     byte *buffer = malloc(bsize);
     if (!buffer)
@@ -92,7 +94,7 @@ int main(int argc, char **argv) {
 
     port = opts->port;
     bsize = opts->bsize;
-    from_addr = check_address(opts->from_addr);
+    listening_address = parse_host_and_port(opts->from_addr, opts->portstr);
 
     audio_pack_buffer = pb_init(bsize);
 

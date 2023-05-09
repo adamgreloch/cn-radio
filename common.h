@@ -59,6 +59,18 @@ inline static struct sockaddr_in get_send_address(char *host, uint16_t port) {
     return send_address;
 }
 
+inline static void enable_multicast(int socket_fd, struct sockaddr_in
+*mcast_addres) {
+    struct ip_mreq ip_mreq;
+    ip_mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    ip_mreq.imr_multiaddr = mcast_addres->sin_addr;
+
+    IN_MULTICAST(ip_mreq.imr_multiaddr.s_addr);
+    CHECK_ERRNO(setsockopt(socket_fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *)
+            &ip_mreq, sizeof(ip_mreq)));
+}
+
+
 inline static uint64_t htonll(uint64_t x) {
 #if __BIG_ENDIAN__
     return x;
@@ -75,7 +87,7 @@ inline static uint64_t ntohll(uint64_t x) {
 #endif
 }
 
-inline static in_addr_t check_address(char* addr) {
+inline static in_addr_t check_address(char *addr) {
     in_addr_t in_addr;
     int res = inet_pton(AF_INET, addr, &in_addr);
     if (res == -1)
@@ -83,6 +95,24 @@ inline static in_addr_t check_address(char* addr) {
     else if (res == 0)
         fatal("Not a correct IPv4 address: %s", addr);
     return in_addr;
+}
+
+inline static struct sockaddr_in parse_host_and_port(const char *hostStr, const
+char *portStr) {
+    struct addrinfo *ai;
+    struct addrinfo hints = {.ai_family = AF_INET, .ai_socktype = 0,
+            .ai_protocol = 0, .ai_flags = 0};
+
+    int gai_error;
+    if ((gai_error = getaddrinfo(hostStr, portStr, &hints, &ai)) == -1) {
+        fprintf(stderr, "getaddrinfo failed: %s", gai_strerror(gai_error));
+    }
+
+    struct sockaddr_in ret;
+    ret = *(struct sockaddr_in *) (ai->ai_addr);
+    freeaddrinfo(ai);
+
+    return ret;
 }
 
 #endif //_COMMON_
