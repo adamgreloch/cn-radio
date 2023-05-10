@@ -20,7 +20,7 @@
 
 struct sender_opts {
     /** address of targeted receiver (set with option -a, obligatory) */
-    char *dest_addr;
+    char dest_addr[20];
 
     /** data port (set with option -P) defaults to @p DATA_PORT */
     uint16_t port;
@@ -39,7 +39,7 @@ struct sender_opts {
     uint64_t rtime;
 
     /** sender name (set with -n) defaults to @p DEFAULT_NAME */
-    char *sender_name;
+    char sender_name[64];
 };
 
 typedef struct sender_opts sender_opts;
@@ -48,7 +48,7 @@ struct receiver_opts {
     /** address of whitelisted sender
      * set with option -a, obligatory
      */
-    char *from_addr;
+    char from_addr[20];
 
     /** data port
      * set with option -P, defaults to @p DATA_PORT
@@ -59,7 +59,7 @@ struct receiver_opts {
     /** address used for control protocol with senders
      * set with option -d, defaults to @p DISCOVER_ADDR
      */
-    char *discover_addr;
+    char discover_addr[20];
 
     /** port used for control protocol with senders
      * set with option -C, defaults to @p CTRL_PORT
@@ -82,7 +82,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
 
     opts->psize = DEFAULT_PSIZE;
     opts->port = DATA_PORT;
-    opts->sender_name = DEFAULT_NAME;
+    sprintf(opts->sender_name, "%s", DEFAULT_NAME);
     opts->ctrl_port = CTRL_PORT;
     opts->rtime = DEFAULT_RTIME;
 
@@ -98,7 +98,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
         switch (c) {
             case 'a':
                 aflag = 1;
-                opts->dest_addr = optarg;
+                memcpy(opts->dest_addr, optarg, strlen(optarg));
                 break;
             case 'C':
                 if ((opts->ctrl_port = strtoul(optarg, NULL, 10)) < 1024) {
@@ -178,7 +178,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
     sprintf(opts->portstr, "%d", DATA_PORT);
     opts->ctrl_port = CTRL_PORT;
     opts->rtime = DEFAULT_RTIME;
-    opts->discover_addr = DISCOVER_ADDR;
+    sprintf(opts->discover_addr, "%s", DISCOVER_ADDR);
 
     int aflag = 0;
 
