@@ -20,7 +20,7 @@
 
 struct sender_opts {
     /** address of targeted receiver (set with option -a, obligatory) */
-    char dest_addr[20];
+    char mcast_addr_str[20];
 
     /** data port (set with option -P) defaults to @p DATA_PORT */
     uint16_t port;
@@ -39,7 +39,7 @@ struct sender_opts {
     uint64_t rtime;
 
     /** sender name (set with -n) defaults to @p DEFAULT_NAME */
-    char sender_name[64];
+    char sender_name[64+1];
 };
 
 typedef struct sender_opts sender_opts;
@@ -77,6 +77,8 @@ struct receiver_opts {
 
 typedef struct receiver_opts receiver_opts;
 
+// TODO handle all incorrect args
+
 inline static sender_opts *get_sender_opts(int argc, char **argv) {
     sender_opts *opts = malloc(sizeof(sender_opts));
 
@@ -98,7 +100,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
         switch (c) {
             case 'a':
                 aflag = 1;
-                memcpy(opts->dest_addr, optarg, strlen(optarg));
+                memcpy(opts->mcast_addr_str, optarg, strlen(optarg));
                 break;
             case 'C':
                 if ((opts->ctrl_port = strtoul(optarg, NULL, 10)) < 1024) {
@@ -111,7 +113,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
             case 'R':
                 opts->rtime = strtoul(optarg, NULL, 10);
                 if (opts->rtime == 0) {
-                    fprintf(stderr, "Invalid rtime: %s\n", optarg);
+                    fprintf(stderr, "Invalid rtime_u: %s\n", optarg);
                     errflag = 1;
                 }
                 break;
@@ -153,7 +155,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
                 free(opts);
                 exit(1);
             default:
-                abort();
+                exit(1);
         }
     }
 
@@ -208,7 +210,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
             case 'R':
                 opts->rtime = strtoul(optarg, NULL, 10);
                 if (opts->rtime == 0) {
-                    fprintf(stderr, "Invalid rtime: %s\n", optarg);
+                    fprintf(stderr, "Invalid rtime_u: %s\n", optarg);
                     errflag = 1;
                 }
                 break;
@@ -241,7 +243,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 free(opts);
                 exit(1);
             default:
-                abort();
+                exit(1);
         }
     }
 

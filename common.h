@@ -59,6 +59,12 @@ inline static struct sockaddr_in get_send_address(char *host, uint16_t port) {
     return send_address;
 }
 
+inline static void enable_broadcast(int socket_fd) {
+    int optval = 1;
+    setsockopt(socket_fd, SOL_SOCKET, SO_BROADCAST, (void *) &optval, sizeof
+            (optval));
+}
+
 inline static void enable_multicast(int socket_fd, struct sockaddr_in
 *mcast_addres) {
     struct ip_mreq ip_mreq;
