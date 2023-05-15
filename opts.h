@@ -11,6 +11,7 @@
 #define NUM 438473
 #define DEFAULT_PSIZE 512
 #define DISCOVER_ADDR "255.255.255.255"
+#define UI_PORT   (10000 + (NUM % 10000))
 #define DATA_PORT (20000 + (NUM % 10000))
 #define CTRL_PORT (30000 + (NUM % 10000))
 #define DEFAULT_BSIZE 65536
@@ -39,7 +40,7 @@ struct sender_opts {
     uint64_t rtime;
 
     /** sender name (set with -n) defaults to @p DEFAULT_NAME */
-    char sender_name[64+1];
+    char sender_name[64 + 1];
 };
 
 typedef struct sender_opts sender_opts;
@@ -68,6 +69,11 @@ struct receiver_opts {
      */
     char ctrl_portstr[12];
     uint16_t ctrl_port;
+
+    /** port used for station switching UI over TCP
+     * set with option -U, defaults to @p UI_PORT
+     */
+    uint16_t ui_port;
 
     /** time between sending missing packs reports to senders
      * set with option -R, defaults to @p DEFAULT_RTIME
@@ -185,6 +191,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
     sprintf(opts->ctrl_portstr, "%d", CTRL_PORT);
     opts->rtime = DEFAULT_RTIME;
     sprintf(opts->discover_addr, "%s", DISCOVER_ADDR);
+    opts->ui_port = UI_PORT;
 
     int aflag = 0;
 
@@ -194,7 +201,9 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
 
     opterr = 0;
 
-    while ((c = getopt(argc, argv, "a:b:P:d:C:R:")) != -1) {
+    size_t port;
+
+    while ((c = getopt(argc, argv, "a:b:P:d:C:R:U:")) != -1) {
         switch (c) {
             case 'a':
                 aflag = 1;
@@ -205,15 +214,25 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 break;
             case 'C':
                 memcpy(opts->ctrl_portstr, optarg, strlen(optarg));
-                if ((opts->ctrl_port = strtoul(optarg, NULL, 10)) < 1024) {
+                port = strtoull(optarg, NULL, 10);
+                if (port < (1 << 10) || port > (1 << 16)) {
                     fprintf(stderr,
                             "Invalid or illegal control port number: %s\n",
                             optarg);
                     errflag = 1;
-                }
+                } else opts->ctrl_port = port;
+                break;
+            case 'U':
+                port = strtoull(optarg, NULL, 10);
+                if (port < (1 << 10) || port > (1 << 16)) {
+                    fprintf(stderr,
+                            "Invalid or illegal UI port number: %s\n",
+                            optarg);
+                    errflag = 1;
+                } else opts->ui_port = port;
                 break;
             case 'R':
-                opts->rtime = strtoul(optarg, NULL, 10);
+                opts->rtime = strtoull(optarg, NULL, 10);
                 if (opts->rtime == 0) {
                     fprintf(stderr, "Invalid rtime_u: %s\n", optarg);
                     errflag = 1;
@@ -227,16 +246,19 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 }
                 break;
             case 'P':
-                if ((opts->port = strtoul(optarg, NULL, 10)) < 1024) {
-                    fprintf(stderr, "Invalid or illegal port number: %s\n",
+                memcpy(opts->portstr, optarg, strlen(optarg));
+                port = strtoull(optarg, NULL, 10);
+                if (port < (1 << 10) || port > (1 << 16)) {
+                    fprintf(stderr,
+                            "Invalid or illegal port number: %s\n",
                             optarg);
                     errflag = 1;
-                } else
-                    memcpy(opts->portstr, optarg, strlen(optarg));
+                } else opts->port = port;
                 break;
             case '?':
                 if (optopt == 'a' || optopt == 'b' || optopt == 'P'
-                    || optopt == 'd' || optopt == 'C' || optopt == 'R')
+                    || optopt == 'd' || optopt == 'C' || optopt == 'R'
+                    || optopt == 'U')
                     fprintf(stderr, "Option -%c requires an argument.\n",
                             optopt);
                 else if (isprint(optopt))

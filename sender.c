@@ -79,7 +79,7 @@ void *pack_sender() {
 }
 
 void *ctrl_listener() {
-    int ctrl_sock_fd = bind_socket(ctrl_port);
+    int ctrl_sock_fd = create_socket(ctrl_port);
 
     char *buffer = malloc(CTRL_BUF_SIZE);
     uint64_t *packs = malloc(CTRL_BUF_SIZE);
