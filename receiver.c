@@ -8,14 +8,19 @@
 #include "err.h"
 #include "pack_buffer.h"
 #include "opts.h"
+#include "ctrl_protocol.h"
 
 uint64_t curr_session_id;
 uint64_t last_session_id = 0;
 
 pack_buffer *audio_pack_buffer;
+uint16_t ctrl_port;
 uint16_t port;
 uint64_t bsize;
-struct sockaddr_in listening_address;
+struct sockaddr_in listening_addr;
+struct sockaddr_in discover_addr;
+
+#define DISCOVER_SLEEP 5
 
 size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
                     uint64_t *psize) {
@@ -60,7 +65,7 @@ void *pack_receiver() {
 
     int socket_fd = bind_socket(port);
 
-    enable_multicast(socket_fd, &listening_address);
+    enable_multicast(socket_fd, &listening_addr);
 
     byte *buffer = malloc(bsize);
     if (!buffer)
@@ -89,22 +94,76 @@ void *pack_printer() {
     }
 }
 
+void *station_discoverer() {
+    int ctrl_sock_fd = bind_socket(ctrl_port);
+    enable_broadcast(ctrl_sock_fd);
+
+    char *write_buffer = malloc(CTRL_BUF_SIZE);
+    if (!write_buffer)
+        fatal("malloc");
+
+    int wrote_size;
+    ssize_t sent_size;
+    ssize_t recv_size;
+    int flags = 0;
+    errno = 0;
+
+    socklen_t discover_addr_len = (socklen_t) sizeof(discover_addr);
+
+    struct sockaddr_in sender_addr;
+    socklen_t sender_addr_len = (socklen_t) sizeof(sender_addr);
+
+    char mcast_addr_str[20];
+    uint16_t sender_port;
+    char sender_name[64+1];
+
+    while (true) {
+        wrote_size = write_lookup(write_buffer);
+        sent_size = sendto(ctrl_sock_fd, write_buffer, wrote_size,
+                           flags, (struct sockaddr *)
+                                   &discover_addr, discover_addr_len);
+        ENSURE(sent_size == wrote_size);
+
+        fprintf(stderr, "sent lookup\n");
+
+        sleep(DISCOVER_SLEEP);
+
+        while ((recv_size = recvfrom(ctrl_sock_fd, write_buffer, CTRL_BUF_SIZE,
+                             MSG_DONTWAIT,
+                             (struct sockaddr *) &sender_addr,
+                             &sender_addr_len)) > 0) {
+            if (what_message(write_buffer) == REPLY) {
+                parse_reply(write_buffer, recv_size, mcast_addr_str, &sender_port,
+                            sender_name);
+                fprintf(stderr, "got reply from %s:%d '%s'\n", mcast_addr_str,
+                        sender_port, sender_name);
+            }
+        }
+        fprintf(stderr, "no more replies\n");
+    }
+}
+
 int main(int argc, char **argv) {
     receiver_opts *opts = get_receiver_opts(argc, argv);
 
     port = opts->port;
     bsize = opts->bsize;
-    listening_address = parse_host_and_port(opts->from_addr, opts->portstr);
+    ctrl_port = opts->ctrl_port;
+    listening_addr = parse_host_and_port(opts->mcast_addr, opts->portstr);
+    discover_addr = parse_host_and_port(opts->discover_addr, opts->ctrl_portstr);
 
     audio_pack_buffer = pb_init(bsize);
 
     pthread_t receiver;
     pthread_t printer;
+    pthread_t discoverer;
 
     CHECK_ERRNO(pthread_create(&receiver, NULL, pack_receiver, NULL));
     CHECK_ERRNO(pthread_create(&printer, NULL, pack_printer, NULL));
+    CHECK_ERRNO(pthread_create(&discoverer, NULL, station_discoverer, NULL));
 
     CHECK_ERRNO(pthread_join(receiver, NULL));
+    CHECK_ERRNO(pthread_join(discoverer, NULL));
     CHECK_ERRNO(pthread_join(printer, NULL));
 
     return 0;

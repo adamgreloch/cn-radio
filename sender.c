@@ -6,10 +6,7 @@
 #include "common.h"
 #include "opts.h"
 #include "ctrl_protocol.h"
-#include "rexmit_set.h"
-
-// Define buffer size as 2^16 - a little more than maximum UDP data size
-#define CTRL_BUF_SIZE 65536
+//#include "rexmit_set.h"
 
 char *sender_name;
 char *mcast_addr_str;
@@ -25,7 +22,7 @@ bool finished = false;
 
 char *send_buffer;
 
-rexmit_set *rq;
+//rexmit_set *rq;
 
 size_t read_pack(FILE *stream, uint64_t pack_size, byte *data) {
     return fread(data, sizeof(byte), pack_size, stream);
@@ -94,6 +91,9 @@ void *ctrl_listener() {
     int flags = 0;
     errno = 0;
 
+    int wrote_size;
+    ssize_t sent_size;
+
     while (!finished) {
         memset(buffer, 0, CTRL_BUF_SIZE);
 
@@ -102,12 +102,19 @@ void *ctrl_listener() {
 
         switch (what_message(buffer)) {
             case LOOKUP:
-                write_reply(buffer, mcast_addr_str, port, sender_name);
+                wrote_size = write_reply(buffer, mcast_addr_str, port,
+                                         sender_name);
+                sent_size = sendto(ctrl_sock_fd, buffer, wrote_size,
+                                   flags, (struct sockaddr *)
+                                           &receiver_addr,
+                                   address_length);
+                fprintf(stderr, "got a lookup!\n");
+                ENSURE(sent_size == wrote_size);
                 break;
             case REXMIT:
                 memset(packs, 0, CTRL_BUF_SIZE);
                 parse_rexmit(buffer, packs, &n_packs);
-                rs_add(rq, packs, n_packs);
+//                rs_add(rq, packs, n_packs);
                 break;
         }
     }

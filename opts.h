@@ -45,10 +45,12 @@ struct sender_opts {
 typedef struct sender_opts sender_opts;
 
 struct receiver_opts {
-    /** address of whitelisted sender
+    /** address of multicast
      * set with option -a, obligatory
+     * FIXME this is only for debugging purposes, until the discovery/TCP
+     *  selector is implemented
      */
-    char from_addr[20];
+    char mcast_addr[20];
 
     /** data port
      * set with option -P, defaults to @p DATA_PORT
@@ -64,6 +66,7 @@ struct receiver_opts {
     /** port used for control protocol with senders
      * set with option -C, defaults to @p CTRL_PORT
      */
+    char ctrl_portstr[12];
     uint16_t ctrl_port;
 
     /** time between sending missing packs reports to senders
@@ -161,7 +164,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
 
     if (aflag == 0) {
         fprintf(stderr, "Usage: ./sikradio-sender "
-                        "-a <dest_address>\n");
+                        "-a <mcast_addr>\n");
         errflag = 1;
     }
 
@@ -179,6 +182,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
     opts->bsize = DEFAULT_BSIZE;
     sprintf(opts->portstr, "%d", DATA_PORT);
     opts->ctrl_port = CTRL_PORT;
+    sprintf(opts->ctrl_portstr, "%d", CTRL_PORT);
     opts->rtime = DEFAULT_RTIME;
     sprintf(opts->discover_addr, "%s", DISCOVER_ADDR);
 
@@ -194,12 +198,13 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
         switch (c) {
             case 'a':
                 aflag = 1;
-                memcpy(opts->from_addr, optarg, strlen(optarg));
+                memcpy(opts->mcast_addr, optarg, strlen(optarg));
                 break;
             case 'd':
                 memcpy(opts->discover_addr, optarg, strlen(optarg));
                 break;
             case 'C':
+                memcpy(opts->ctrl_portstr, optarg, strlen(optarg));
                 if ((opts->ctrl_port = strtoul(optarg, NULL, 10)) < 1024) {
                     fprintf(stderr,
                             "Invalid or illegal control port number: %s\n",
@@ -249,7 +254,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
 
     if (aflag == 0) {
         fprintf(stderr, "Usage: ./sikradio-receiver "
-                        "-a <sender_address>\n");
+                        "-a <mcast_addr>\n");
         errflag = 1;
     }
 

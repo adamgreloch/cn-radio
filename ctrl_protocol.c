@@ -14,22 +14,24 @@ int lookup_strlen = strlen(LOOKUP_STR);
 int reply_strlen = strlen(REPLY_STR);
 int rexmit_strlen = strlen(REXMIT_STR);
 
-void write_lookup(char *buf) {
-    sprintf(buf, "%s", LOOKUP_STR);
+int write_lookup(char *buf) {
+    return sprintf(buf, "%s", LOOKUP_STR);
 }
 
-void write_reply(char *buf, char* mcast_addr_str, uint16_t port,
+int write_reply(char *buf, char* mcast_addr_str, uint16_t port,
                                char* sender_name) {
-    sprintf(buf, "%s %s %d %s", REPLY_STR, mcast_addr_str, port, sender_name);
+    return sprintf(buf, "%s %s %d %s", REPLY_STR, mcast_addr_str, port,
+               sender_name);
 }
 
-void write_rexmit(char *buf, uint64_t *packs, uint64_t n_packs) {
+int write_rexmit(char *buf, uint64_t *packs, uint64_t n_packs) {
     size_t wrote = sprintf(buf, "%s ", REXMIT_STR);
 
     for (uint64_t i = 0; i < n_packs - 1; i++)
         wrote += sprintf(buf + wrote, "%lu,", packs[i]);
 
-    sprintf(buf + wrote, "%lu", packs[n_packs - 1]);
+    wrote += sprintf(buf + wrote, "%lu", packs[n_packs - 1]);
+    return wrote;
 }
 
 int what_message(char *buf) {
