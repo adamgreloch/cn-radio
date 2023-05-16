@@ -29,16 +29,13 @@ stations *st;
 char telnet_negotation[] = {255, 253, 34, 255, 250, 34, 1, 0, 255, 240, 255,
                             251, 1};
 
-char *line_break =
-        "------------------------------------------------------------------------\r\n";
-
 #define DISCOVER_SLEEP 5
 #define INACTIVITY_THRESH 20
 
 size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
                     uint64_t *psize) {
     size_t read_length;
-    int flags = 0;
+    int flags = MSG_DONTWAIT;
     errno = 0;
 
     memset(buffer, 0, bsize);
@@ -48,6 +45,11 @@ size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
 
     read_length = recvfrom(socket_fd, buffer, bsize, flags, (struct sockaddr
     *) &client_address, &address_length);
+
+    if (errno == EWOULDBLOCK) {
+        sleep(1);
+        return 0;
+    }
 
     // FIXME radio stations may interfere on one multicast address
 
@@ -84,8 +86,12 @@ void *pack_receiver() {
     if (!buffer)
         fatal("malloc");
 
+    station* station;
+
     while (true) {
         read_length = receive_pack(socket_fd, &pack, buffer, &psize);
+
+        switch_if_changed(st, &station); // TODO make it one function
 
         if (read_length > 0)
             pb_push_back(audio_pack_buffer, ntohll(pack->first_byte_num),
@@ -137,8 +143,6 @@ void *station_discoverer() {
                                    &discover_addr, discover_addr_len);
         ENSURE(sent_size == wrote_size);
 
-//        fprintf(stderr, "sent lookup\n");
-
         sleep(DISCOVER_SLEEP);
 
         while ((recv_size = recvfrom(ctrl_sock_fd, write_buffer, CTRL_BUF_SIZE,
@@ -150,13 +154,10 @@ void *station_discoverer() {
                             &sender_port,
                             sender_name);
                 update_station(st, mcast_addr_str, sender_port, sender_name);
-//                fprintf(stderr, "got reply from %s:%d '%s'\n", mcast_addr_str,
-//                        sender_port, sender_name);
             }
         }
 
         delete_inactive_stations(st, INACTIVITY_THRESH);
-//        fprintf(stderr, "no more replies\n");
     }
 }
 
@@ -165,7 +166,7 @@ void *station_discoverer() {
 #define TIMEOUT (-1)
 
 // TODO set reasonable buf sizes
-#define UI_BUF_SIZE 65536
+#define UI_BUF_SIZE 512
 #define NAV_BUF_SIZE 128
 
 void *ui_manager() {
@@ -186,7 +187,8 @@ void *ui_manager() {
         PRINT_ERRNO();
     }
 
-    char *ui_buffer = malloc(UI_BUF_SIZE);
+    uint64_t ui_buffer_size = UI_BUF_SIZE;
+    char *ui_buffer = malloc(sizeof(UI_BUF_SIZE) * ui_buffer_size);
     if (!ui_buffer)
         fatal("malloc");
 
@@ -266,13 +268,9 @@ void *ui_manager() {
                         fprintf(stderr, "telnet negotiation complete\n");
                     } else {
                         size_t ui_len;
-                        print_ui(&ui_buffer, &ui_len, st);
-//                        ssize_t ui_len = sprintf(ui_buffer, "\033[H\033[J");
-//                        ui_len += sprintf(ui_buffer + ui_len,
-//                                          "%s SIK Radio\r\n%s > Radio\r\n%s",
-//                                          line_break, line_break, line_break);
+                        print_ui(&ui_buffer, &ui_buffer_size, &ui_len, st);
                         sent = write(pd[i].fd, ui_buffer, ui_len);
-                        ENSURE(sent == ui_len);
+                        ENSURE(sent == (ssize_t) ui_len);
                     }
                 }
             }

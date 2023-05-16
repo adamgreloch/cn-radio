@@ -36,6 +36,6 @@ void select_station_down(stations *st);
 
 bool is_change_pending(stations *st);
 
-station *switch_to_changed(stations *st);
+bool switch_if_changed(stations *st, station **new_station);
 
 #endif //_RECEIVER_UI_

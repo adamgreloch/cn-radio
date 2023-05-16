@@ -109,6 +109,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
         switch (c) {
             case 'a':
                 aflag = 1;
+                memset(opts->mcast_addr_str, 0, sizeof(opts->mcast_addr_str));
                 memcpy(opts->mcast_addr_str, optarg, strlen(optarg));
                 break;
             case 'C':
@@ -131,8 +132,10 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
                 if (len > MAX_NAME_LEN) {
                     fprintf(stderr, "Name too long: %s\n", optarg);
                     errflag = 1;
-                } else
+                } else {
+                    memset(opts->sender_name, 0, sizeof(opts->sender_name));
                     memcpy(opts->sender_name, optarg, strlen(optarg));
+                }
                 break;
             case 'p':
                 opts->psize = strtoul(optarg, NULL, 10);
@@ -207,12 +210,15 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
         switch (c) {
             case 'a':
                 aflag = 1;
+                memset(opts->mcast_addr, 0, sizeof(opts->mcast_addr));
                 memcpy(opts->mcast_addr, optarg, strlen(optarg));
                 break;
             case 'd':
+                memset(opts->discover_addr, 0, sizeof(opts->discover_addr));
                 memcpy(opts->discover_addr, optarg, strlen(optarg));
                 break;
             case 'C':
+                memset(opts->ctrl_portstr, 0, sizeof(opts->ctrl_portstr));
                 memcpy(opts->ctrl_portstr, optarg, strlen(optarg));
                 port = strtoull(optarg, NULL, 10);
                 if (port < (1 << 10) || port > (1 << 16)) {
@@ -246,6 +252,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 }
                 break;
             case 'P':
+                memset(opts->portstr, 0, sizeof(opts->portstr));
                 memcpy(opts->portstr, optarg, strlen(optarg));
                 port = strtoull(optarg, NULL, 10);
                 if (port < (1 << 10) || port > (1 << 16)) {
