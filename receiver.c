@@ -10,6 +10,7 @@
 #include "pack_buffer.h"
 #include "opts.h"
 #include "ctrl_protocol.h"
+#include "receiver_ui.h"
 
 uint64_t curr_session_id;
 uint64_t last_session_id = 0;
@@ -22,6 +23,8 @@ uint64_t bsize;
 struct sockaddr_in listening_addr;
 struct sockaddr_in discover_addr;
 
+stations *st;
+
 // IAC DO LINEMODE, IAC SB LINEMODE MODE 0 IAC SE, IAC WILL ECHO
 char telnet_negotation[] = {255, 253, 34, 255, 250, 34, 1, 0, 255, 240, 255,
                             251, 1};
@@ -30,6 +33,7 @@ char *line_break =
         "------------------------------------------------------------------------\r\n";
 
 #define DISCOVER_SLEEP 5
+#define INACTIVITY_THRESH 20
 
 size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
                     uint64_t *psize) {
@@ -74,7 +78,7 @@ void *pack_receiver() {
 
     int socket_fd = create_socket(port);
 
-    enable_multicast(socket_fd, &listening_addr);
+    enable_multicast(socket_fd, &listening_addr); // TODO is necessary?
 
     byte *buffer = malloc(bsize);
     if (!buffer)
@@ -145,10 +149,13 @@ void *station_discoverer() {
                 parse_reply(write_buffer, recv_size, mcast_addr_str,
                             &sender_port,
                             sender_name);
+                update_station(st, mcast_addr_str, sender_port, sender_name);
 //                fprintf(stderr, "got reply from %s:%d '%s'\n", mcast_addr_str,
 //                        sender_port, sender_name);
             }
         }
+
+        delete_inactive_stations(st, INACTIVITY_THRESH);
 //        fprintf(stderr, "no more replies\n");
     }
 }
@@ -235,10 +242,12 @@ void *ui_manager() {
                                 case 'A':
                                     // arrow up
                                     fprintf(stderr, "arrow up\n");
+                                    select_station_up(st);
                                     break;
                                 case 'B':
                                     // arrow down
                                     fprintf(stderr, "arrow down\n");
+                                    select_station_down(st);
                                     break;
                             }
                     }
@@ -256,10 +265,12 @@ void *ui_manager() {
                         negotiated[i] = true;
                         fprintf(stderr, "telnet negotiation complete\n");
                     } else {
-                        ssize_t ui_len = sprintf(ui_buffer, "\033[H\033[J");
-                        ui_len += sprintf(ui_buffer + ui_len,
-                                          "%s SIK Radio\r\n%s > Radio\r\n%s",
-                                          line_break, line_break, line_break);
+                        size_t ui_len;
+                        print_ui(&ui_buffer, &ui_len, st);
+//                        ssize_t ui_len = sprintf(ui_buffer, "\033[H\033[J");
+//                        ui_len += sprintf(ui_buffer + ui_len,
+//                                          "%s SIK Radio\r\n%s > Radio\r\n%s",
+//                                          line_break, line_break, line_break);
                         sent = write(pd[i].fd, ui_buffer, ui_len);
                         ENSURE(sent == ui_len);
                     }
@@ -281,6 +292,8 @@ int main(int argc, char **argv) {
     ui_port = opts->ui_port;
 
     audio_pack_buffer = pb_init(bsize);
+
+    st = init_stations();
 
     pthread_t receiver;
     pthread_t printer;
