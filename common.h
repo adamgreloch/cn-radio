@@ -41,7 +41,8 @@ inline static int create_socket(uint16_t port) {
 inline static void bind_socket(int socket_fd, uint16_t port) {
     struct sockaddr_in server_address;
     server_address.sin_family = AF_INET; // IPv4
-    server_address.sin_addr.s_addr = htonl(INADDR_ANY); // listening on all interfaces
+    server_address.sin_addr.s_addr = htonl(
+            INADDR_ANY); // listening on all interfaces
     server_address.sin_port = htons(port);
 
     // bind the socket to a concrete address
@@ -54,10 +55,12 @@ inline static void start_listening(int socket_fd, size_t queue_length) {
     CHECK_ERRNO(listen(socket_fd, queue_length));
 }
 
-inline static int accept_connection(int socket_fd, struct sockaddr_in *client_address) {
+inline static int
+accept_connection(int socket_fd, struct sockaddr_in *client_address) {
     socklen_t client_address_length = (socklen_t) sizeof(*client_address);
 
-    int client_fd = accept(socket_fd, (struct sockaddr *) client_address, &client_address_length);
+    int client_fd = accept(socket_fd, (struct sockaddr *) client_address,
+                           &client_address_length);
     if (client_fd < 0) {
         PRINT_ERRNO();
     }
@@ -65,8 +68,10 @@ inline static int accept_connection(int socket_fd, struct sockaddr_in *client_ad
     return client_fd;
 }
 
-inline static void connect_socket(int socket_fd, const struct sockaddr_in *address) {
-    CHECK_ERRNO(connect(socket_fd, (struct sockaddr *) address, sizeof(*address)));
+inline static void
+connect_socket(int socket_fd, const struct sockaddr_in *address) {
+    CHECK_ERRNO(
+            connect(socket_fd, (struct sockaddr *) address, sizeof(*address)));
 }
 
 inline static struct sockaddr_in get_send_address(char *host, uint16_t port) {
@@ -105,6 +110,11 @@ inline static void enable_multicast(int socket_fd, struct sockaddr_in
     IN_MULTICAST(ip_mreq.imr_multiaddr.s_addr);
     CHECK_ERRNO(setsockopt(socket_fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *)
             &ip_mreq, sizeof(ip_mreq)));
+
+    // disable self-reception
+    int opt = 0;
+    CHECK_ERRNO(setsockopt(socket_fd, IPPROTO_IP, IP_MULTICAST_LOOP, &opt,
+                           sizeof(opt)));
 }
 
 

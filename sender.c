@@ -102,13 +102,13 @@ void *ctrl_listener() {
 
         switch (what_message(buffer)) {
             case LOOKUP:
+                memset(buffer, 0, CTRL_BUF_SIZE);
                 wrote_size = write_reply(buffer, mcast_addr_str, port,
                                          sender_name);
                 sent_size = sendto(ctrl_sock_fd, buffer, wrote_size,
                                    flags, (struct sockaddr *)
                                            &receiver_addr,
                                    address_length);
-                fprintf(stderr, "got a lookup!\n");
                 ENSURE(sent_size == wrote_size);
                 break;
             case REXMIT:

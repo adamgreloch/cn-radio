@@ -38,4 +38,8 @@ bool is_change_pending(stations *st);
 
 bool switch_if_changed(stations *st, station **new_station);
 
+void remove_current_for_inactivity(stations *st);
+
+void wait_until_any_station_found(stations *st);
+
 #endif //_RECEIVER_UI_

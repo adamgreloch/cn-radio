@@ -22,6 +22,7 @@ struct stations {
 
     pthread_mutex_t mutex;
     pthread_cond_t wait_for_change;
+    pthread_cond_t wait_for_found;
 };
 
 stations *init_stations() {
@@ -39,6 +40,7 @@ stations *init_stations() {
 
     CHECK_ERRNO(pthread_mutex_init(&st->mutex, NULL));
     CHECK_ERRNO(pthread_cond_init(&st->wait_for_change, NULL));
+    CHECK_ERRNO(pthread_cond_init(&st->wait_for_found, NULL));
 
     return st;
 }
@@ -69,6 +71,16 @@ int _station_compare(const void *a, const void *b) {
     return _str_compare(st1->name, st2->name);
 }
 
+void _sort_stations(stations *st) {
+    qsort(st->data, st->size, sizeof(station*), _station_compare);
+
+    uint64_t i = 0;
+    // TODO optimize to binsearch
+    while (st->data[i] != st->current)
+        i++;
+    st->current_pos = i;
+}
+
 void
 update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
@@ -77,10 +89,12 @@ update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
         CHECK_ERRNO(pthread_cond_wait(&st->wait_for_change, &st->mutex));
 
     if (st->count == st->size) {
-        st->size *= 2;
-        st->data = realloc(st->data, st->size);
+        st->data = realloc(st->data, 2 * st->size);
         if (!st->data)
             fatal("realloc");
+        for (size_t i = 0; i < st->size; i++)
+            st->data[i + st->size] = NULL;
+        st->size *= 2;
     }
 
     size_t empty = st->size + 1;
@@ -114,26 +128,21 @@ update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
         st->count++;
     }
 
-    qsort(st->data, st->size, sizeof(station*), _station_compare);
-
     if (!st->current) {
         st->current = st->data[0];
         st->current_pos = 0;
         st->change_pending = true;
+        CHECK_ERRNO(pthread_cond_signal(&st->wait_for_found));
     }
 
-    // TODO optimize to binsearch
-    uint64_t i = 0;
-    while (st->data[i] != st->current)
-        i++;
-    st->current_pos = i;
+    _sort_stations(st);
 
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
 
 void _move_selection(stations *st, int delta) {
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
-    if (st->count > 0) {
+    if (st->count > 1) {
         st->current_pos = (st->current_pos + st->count + delta) % st->count;
         st->current = st->data[st->current_pos];
         st->change_pending = true;
@@ -190,7 +199,6 @@ void select_station_down(stations *st) {
 
 bool switch_if_changed(stations *st, station **new_station) {
     bool res = false;
-    *new_station = malloc(sizeof(station));
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     if (st->change_pending) {
         memcpy(*new_station, st->current, sizeof(station));
@@ -208,9 +216,32 @@ void delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
     uint64_t prev_count = st->count;
     for (size_t i = 0; i < prev_count; i++)
         if (now - st->data[i]->last_heard >= inactivity_sec) {
+            if (st->data[i] == st->current)
+                st->current = NULL;
             free(st->data[i]);
             st->data[i] = NULL;
             st->count--;
         }
+
+    _sort_stations(st);
+    CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
+}
+
+void remove_current_for_inactivity(stations *st) {
+    CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
+    if (!st->change_pending) {
+        free(st->current);
+        st->current = NULL;
+        st->data[st->current_pos] = NULL;
+        st->count--;
+        _sort_stations(st);
+    }
+    CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
+}
+
+void wait_until_any_station_found(stations *st) {
+    CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
+    while (!st->current)
+        CHECK_ERRNO(pthread_cond_wait(&st->wait_for_found, &st->mutex));
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }

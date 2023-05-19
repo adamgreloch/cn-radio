@@ -13,7 +13,7 @@ typedef struct pack_buffer pack_buffer;
  * Initializes the pack buffer. Returns a pointer to struct.
  * @param bsize - size of pack buffer in bytes
  */
-pack_buffer *pb_init(size_t bsize);
+pack_buffer *pb_init(uint64_t bsize);
 
 /**
  * Resets the pack buffer to initial state.

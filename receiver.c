@@ -25,17 +25,13 @@ struct sockaddr_in discover_addr;
 
 stations *st;
 
-// IAC DO LINEMODE, IAC SB LINEMODE MODE 0 IAC SE, IAC WILL ECHO
-char telnet_negotation[] = {255, 253, 34, 255, 250, 34, 1, 0, 255, 240, 255,
-                            251, 1};
-
 #define DISCOVER_SLEEP 5
 #define INACTIVITY_THRESH 20
 
 size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
                     uint64_t *psize) {
-    size_t read_length;
-    int flags = MSG_DONTWAIT;
+    ssize_t read_length;
+    int flags = 0;
     errno = 0;
 
     memset(buffer, 0, bsize);
@@ -46,12 +42,11 @@ size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
     read_length = recvfrom(socket_fd, buffer, bsize, flags, (struct sockaddr
     *) &client_address, &address_length);
 
-    if (errno == EWOULDBLOCK) {
-        sleep(1);
+    if (read_length < 0) {
+        remove_current_for_inactivity(st);
         return 0;
     }
 
-    // FIXME radio stations may interfere on one multicast address
 
     *psize = read_length - 16;
 
@@ -72,26 +67,48 @@ size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
     return read_length;
 }
 
+int create_recv_socket(uint16_t port, struct sockaddr_in* mcast_addr) {
+    int socket_fd = create_socket(port);
+
+    struct timeval tv;
+    tv.tv_sec = INACTIVITY_THRESH;
+    tv.tv_usec = 0;
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+        fatal("setsockopt");
+
+    enable_multicast(socket_fd, mcast_addr);
+
+    return socket_fd;
+}
+
 void *pack_receiver() {
     uint64_t psize;
 
     struct audio_pack *pack = malloc(sizeof(struct audio_pack));
     size_t read_length;
 
-    int socket_fd = create_socket(port);
-
-    enable_multicast(socket_fd, &listening_addr); // TODO is necessary?
+    int socket_fd = -1;
 
     byte *buffer = malloc(bsize);
     if (!buffer)
         fatal("malloc");
 
-    station* station;
+    station *station = malloc(sizeof(station));
+    struct sockaddr_in station_addr;
+
+    wait_until_any_station_found(st);
 
     while (true) {
-        read_length = receive_pack(socket_fd, &pack, buffer, &psize);
+        if (switch_if_changed(st, &station)) {
+            if (socket_fd > 0)
+                CHECK_ERRNO(close(socket_fd));
 
-        switch_if_changed(st, &station); // TODO make it one function
+            inet_aton(station->mcast_addr, &station_addr.sin_addr);
+            socket_fd = create_recv_socket(station->port, &station_addr);
+            last_session_id = 0;
+        }
+
+        read_length = receive_pack(socket_fd, &pack, buffer, &psize);
 
         if (read_length > 0)
             pb_push_back(audio_pack_buffer, ntohll(pack->first_byte_num),
@@ -137,6 +154,8 @@ void *station_discoverer() {
     char sender_name[64 + 1];
 
     while (true) {
+        memset(write_buffer, 0, CTRL_BUF_SIZE);
+
         wrote_size = write_lookup(write_buffer);
         sent_size = sendto(ctrl_sock_fd, write_buffer, wrote_size,
                            flags, (struct sockaddr *)
@@ -144,6 +163,8 @@ void *station_discoverer() {
         ENSURE(sent_size == wrote_size);
 
         sleep(DISCOVER_SLEEP);
+
+        memset(write_buffer, 0, CTRL_BUF_SIZE);
 
         while ((recv_size = recvfrom(ctrl_sock_fd, write_buffer, CTRL_BUF_SIZE,
                                      MSG_DONTWAIT,
@@ -155,6 +176,10 @@ void *station_discoverer() {
                             sender_name);
                 update_station(st, mcast_addr_str, sender_port, sender_name);
             }
+
+            memset(mcast_addr_str, 0, sizeof(mcast_addr_str));
+            memset(sender_name, 0, sizeof(sender_name));
+            memset(write_buffer, 0, CTRL_BUF_SIZE);
         }
 
         delete_inactive_stations(st, INACTIVITY_THRESH);
@@ -168,6 +193,29 @@ void *station_discoverer() {
 // TODO set reasonable buf sizes
 #define UI_BUF_SIZE 512
 #define NAV_BUF_SIZE 128
+
+// IAC DO LINEMODE, IAC SB LINEMODE MODE 0 IAC SE, IAC WILL ECHO
+char telnet_negotation[] = {255, 253, 34, 255, 250, 34, 1, 0, 255, 240, 255,
+                            251, 1};
+
+void negotiate_telnet(int fd, char *buf) {
+    for (size_t i = 0; i < sizeof(telnet_negotation); i++)
+        buf[i] = telnet_negotation[i];
+    ssize_t sent = write(fd, buf, sizeof(telnet_negotation));
+    ENSURE(sent == sizeof(telnet_negotation));
+}
+
+void handle_input(char *nav_buffer) {
+    if (nav_buffer[0] == '\033' && nav_buffer[1] == '\133')
+        switch (nav_buffer[2]) {
+            case 'A': // Received arrow up
+                select_station_up(st);
+                break;
+            case 'B': // Received arrow down
+                select_station_down(st);
+                break;
+        }
+}
 
 void *ui_manager() {
     int pd_size = INIT_PD_SIZE;
@@ -222,10 +270,17 @@ void *ui_manager() {
                         break;
                     }
                 }
-                if (!accepted)
-                    // Too many clients
-                    CHECK_ERRNO(close(client_fd));
+
+                if (!accepted) {
+                    // pd table is too small. Resize it
+                    pd_size *= 2;
+                    pd = realloc(pd, pd_size);
+                    if (!pd)
+                        fatal("realloc");
+                    pd[pd_size].fd = client_fd;
+                }
             }
+
             for (int i = 1; i < pd_size; i++) {
                 if (pd[i].fd != -1 &&
                     (pd[i].revents & (POLLIN | POLLERR))) {
@@ -238,34 +293,16 @@ void *ui_manager() {
                         // Client has closed connection
                         CHECK_ERRNO(close(pd[i].fd));
                         pd[i].fd = -1;
-                    } else {
-                        if (nav_buffer[0] == '\033' && nav_buffer[1] == '\133')
-                            switch (nav_buffer[2]) {
-                                case 'A':
-                                    // arrow up
-                                    fprintf(stderr, "arrow up\n");
-                                    select_station_up(st);
-                                    break;
-                                case 'B':
-                                    // arrow down
-                                    fprintf(stderr, "arrow down\n");
-                                    select_station_down(st);
-                                    break;
-                            }
-                    }
+                    } else
+                        handle_input(nav_buffer);
                 }
                 if (pd[i].fd != -1 &&
                     (pd[i].revents & (POLLOUT))) {
                     ssize_t sent;
                     memset(ui_buffer, 0, UI_BUF_SIZE);
                     if (!negotiated[i]) {
-                        for (size_t j = 0; j < sizeof(telnet_negotation); j++)
-                            ui_buffer[j] = telnet_negotation[j];
-                        sent = write(pd[i].fd, ui_buffer,
-                                     sizeof(telnet_negotation));
-                        ENSURE(sent == sizeof(telnet_negotation));
+                        negotiate_telnet(pd[i].fd, ui_buffer);
                         negotiated[i] = true;
-                        fprintf(stderr, "telnet negotiation complete\n");
                     } else {
                         size_t ui_len;
                         print_ui(&ui_buffer, &ui_buffer_size, &ui_len, st);
