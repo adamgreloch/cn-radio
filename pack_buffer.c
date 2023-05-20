@@ -17,8 +17,6 @@ struct pack_buffer {
     uint64_t byte_zero;                   /**< current session's byte0 */
     byte *tail;                            /**< pointer to buffer tail */
 
-    char *stderr_buf;            /**< buffer used for stderr printouts */
-
     pthread_mutex_t mutex;
     pthread_cond_t byte_zero_wait;
 };
@@ -36,8 +34,6 @@ pack_buffer *pb_init(uint64_t bsize) {
     pb->psize = 0;
     pb->head = pb->tail = pb->buf;
     pb->head_byte_num = pb->byte_zero = 0;
-
-    pb->stderr_buf = malloc(bsize * sizeof(missing_fmt) * sizeof(char));
 
     CHECK_ERRNO(pthread_mutex_init(&pb->mutex, NULL));
     CHECK_ERRNO(pthread_cond_init(&pb->byte_zero_wait, NULL));
@@ -66,20 +62,23 @@ void handle_buf_end_overlap(byte **pos, pack_buffer *pb) {
         *pos = pb->buf;
 }
 
-/**
- * Finds all packs older than @p first_byte_num pack that could fit into the
- * buffer and are not present and prints their byte numbers to STDERR in
- * increasing order.
- * @param pb - pointer to pack buffer
- * @param first_byte_num - byte number identifying the pack of interest
- */
-void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
+void pb_find_missing(pack_buffer *pb, uint64_t *n_packs,
+                     uint64_t **missing_buf, uint64_t *buf_size) {
+    CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
+    size_t exp_size = sizeof(uint64_t) * pb->capacity / pb->psize;
+
+    if (*buf_size != exp_size) {
+        *missing_buf = realloc(*missing_buf, exp_size);
+        if (!(*missing_buf))
+            fatal("realloc");
+        *buf_size = exp_size;
+    }
+
     byte *pos = pb->tail;
     uint64_t missing_byte_num;
     uint64_t shift = 0;
 
-    pb->stderr_buf[0] = '\0';
-    uint64_t written = 0;
+    uint64_t last = 0;
 
     while (pos != pb->head) {
         if (!pb->is_present[pos - pb->buf]) {
@@ -90,11 +89,9 @@ void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
 
             missing_byte_num = pb->head_byte_num - (pb->head - shift - pos);
 
-            if (missing_byte_num < first_byte_num &&
+            if (missing_byte_num < pb->head_byte_num &&
                 missing_byte_num > pb->byte_zero)
-                written += sprintf(pb->stderr_buf + written, missing_fmt,
-                                   first_byte_num / pb->psize,
-                                   missing_byte_num / pb->psize);
+                (*missing_buf)[last++] = missing_byte_num;
         }
 
         pos += pb->psize;
@@ -103,19 +100,9 @@ void find_missing(pack_buffer *pb, uint64_t first_byte_num) {
             handle_buf_end_overlap(&pos, pb);
     }
 
-    if (pb->head_byte_num < first_byte_num) {
-        // Print packet numbers that are definitely missing - from range
-        // head_byte_num to first_byte_num.
-        uint64_t byte_num = pb->head_byte_num;
+    CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 
-        while (byte_num < first_byte_num) {
-            written += sprintf(pb->stderr_buf + written, missing_fmt,
-                               first_byte_num / pb->psize, byte_num / pb->psize);
-            byte_num += pb->psize;
-        }
-    }
-
-    fprintf(stderr, "%s", pb->stderr_buf);
+    *n_packs = last;
 }
 
 /**
@@ -232,10 +219,8 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
     if (pb->psize != psize) return;
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
 
-    if (!is_in_buffer(pb, first_byte_num)) {
-        find_missing(pb, first_byte_num);
+    if (!is_in_buffer(pb, first_byte_num))
         insert_pack_into_buffer(pb, first_byte_num, pack);
-    }
 
     if (pb->head_byte_num - pb->byte_zero >= pb->capacity / 4 * 3)
         CHECK_ERRNO(pthread_cond_signal(&pb->byte_zero_wait));
@@ -243,16 +228,17 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 }
 
-void take_pack_if_present(pack_buffer *pb, void *item) {
+void take_pack_if_present_else_reset(pack_buffer *pb, void *item) {
     if (pb->is_present[pb->tail - pb->buf]) {
         memcpy(item, pb->tail, pb->psize);
         pb->is_present[pb->tail - pb->buf] = false;
-    }
 
-    if (pb->head != pb->tail) {
-        pb->tail += pb->psize;
-        handle_buf_end_overlap(&pb->tail, pb);
-    }
+        if (pb->head != pb->tail) {
+            pb->tail += pb->psize;
+            handle_buf_end_overlap(&pb->tail, pb);
+        }
+    } else
+        reset_buffer(pb, pb->head_byte_num);
 }
 
 uint64_t pb_pop_front(pack_buffer *pb, void *item) {
@@ -268,7 +254,7 @@ uint64_t pb_pop_front(pack_buffer *pb, void *item) {
         CHECK_ERRNO(pthread_cond_wait(&pb->byte_zero_wait, &pb->mutex));
     }
 
-    take_pack_if_present(pb, item);
+    take_pack_if_present_else_reset(pb, item);
 
     uint64_t curr_psize = pb->psize;
 

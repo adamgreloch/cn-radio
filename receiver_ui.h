@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <arpa/inet.h>
 
 struct stations;
 typedef struct stations stations;
@@ -33,8 +34,6 @@ void print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st);
 void select_station_up(stations *st);
 
 void select_station_down(stations *st);
-
-bool is_change_pending(stations *st);
 
 bool switch_if_changed(stations *st, station **new_station);
 

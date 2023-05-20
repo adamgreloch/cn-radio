@@ -50,4 +50,13 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
  */
 uint64_t pb_pop_front(pack_buffer *pb, void *item);
 
+/**
+ * Finds all packs older than @p first_byte_num pack that could fit into the
+ * buffer and are not present and stores them in @p buf in increasing order.
+ * @param pb - pointer to pack buffer
+ * @returns array of numbers of missing packs
+ */
+void pb_find_missing(pack_buffer *pb, uint64_t *n_packs,
+                     uint64_t **missing_buf, uint64_t *buf_size);
+
 #endif //_PACK_BUFFER_

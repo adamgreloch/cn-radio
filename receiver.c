@@ -20,13 +20,18 @@ uint16_t ctrl_port;
 uint16_t ui_port;
 uint16_t port;
 uint64_t bsize;
-struct sockaddr_in listening_addr;
+uint64_t rtime_u;
 struct sockaddr_in discover_addr;
 
 stations *st;
 
+station *curr_station;
+
 #define DISCOVER_SLEEP 5
 #define INACTIVITY_THRESH 20
+
+struct sockaddr_in client_address;
+socklen_t client_address_len = (socklen_t) sizeof(client_address);
 
 size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
                     uint64_t *psize) {
@@ -36,17 +41,13 @@ size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
 
     memset(buffer, 0, bsize);
 
-    struct sockaddr_in client_address;
-    socklen_t address_length = (socklen_t) sizeof(client_address);
-
     read_length = recvfrom(socket_fd, buffer, bsize, flags, (struct sockaddr
-    *) &client_address, &address_length);
+    *) &client_address, &client_address_len);
 
     if (read_length < 0) {
         remove_current_for_inactivity(st);
         return 0;
     }
-
 
     *psize = read_length - 16;
 
@@ -67,14 +68,14 @@ size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
     return read_length;
 }
 
-int create_recv_socket(uint16_t port, struct sockaddr_in* mcast_addr) {
+int create_recv_socket(uint16_t port, struct sockaddr_in *mcast_addr) {
     int socket_fd = create_socket(port);
 
     struct timeval tv;
     tv.tv_sec = INACTIVITY_THRESH;
     tv.tv_usec = 0;
-    if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
-        fatal("setsockopt");
+    CHECK_ERRNO(setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof
+            (tv)));
 
     enable_multicast(socket_fd, mcast_addr);
 
@@ -93,18 +94,18 @@ void *pack_receiver() {
     if (!buffer)
         fatal("malloc");
 
-    station *station = malloc(sizeof(station));
     struct sockaddr_in station_addr;
 
+    // TODO rewrite to wait for station with given name
     wait_until_any_station_found(st);
 
     while (true) {
-        if (switch_if_changed(st, &station)) {
+        if (switch_if_changed(st, &curr_station)) {
             if (socket_fd > 0)
                 CHECK_ERRNO(close(socket_fd));
 
-            inet_aton(station->mcast_addr, &station_addr.sin_addr);
-            socket_fd = create_recv_socket(station->port, &station_addr);
+            inet_aton(curr_station->mcast_addr, &station_addr.sin_addr);
+            socket_fd = create_recv_socket(curr_station->port, &station_addr);
             last_session_id = 0;
         }
 
@@ -127,6 +128,70 @@ void *pack_printer() {
         memset(write_buffer, 0, bsize);
         psize = pb_pop_front(audio_pack_buffer, write_buffer);
         fwrite(write_buffer, psize, sizeof(byte), stdout);
+    }
+}
+
+#define UDP_IPV4_DATASIZE 65507
+
+#define max(a, b)             \
+({                           \
+    __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+    _a > _b ? _a : _b;       \
+})
+
+#define min(a, b)             \
+({                           \
+    __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+    _a < _b ? _a : _b;       \
+})
+
+void *missing_reporter() {
+    int send_sock_fd = open_socket();
+    bind_socket(send_sock_fd, 0); // bind to any port
+
+    char *write_buffer = malloc(UDP_IPV4_DATASIZE);
+    if (!write_buffer)
+        fatal("malloc");
+
+    uint64_t n_packs_total = 0;
+    uint64_t n_packs_to_send;
+    uint64_t n_packs_sent = 0;
+
+    int wrote_size;
+    ssize_t sent_size;
+    int flags = 0;
+    errno = 0;
+
+    uint64_t *missing_buf = NULL;
+    uint64_t buf_size = 0;
+
+    wait_until_any_station_found(st);
+
+    while (true) {
+        usleep(rtime_u);
+        pb_find_missing(audio_pack_buffer, &n_packs_total, &missing_buf,
+                        &buf_size);
+
+        if (n_packs_total > 0)
+            while (n_packs_total > n_packs_sent) {
+                n_packs_to_send = min(n_packs_total - n_packs_sent,
+                                      UDP_IPV4_DATASIZE / sizeof(uint64_t));
+
+                wrote_size = write_rexmit(write_buffer,
+                                          missing_buf + n_packs_sent,
+                                          n_packs_to_send);
+                n_packs_sent += n_packs_to_send;
+
+                client_address.sin_port = htons(ctrl_port);
+
+                sent_size = sendto(send_sock_fd, write_buffer, wrote_size,
+                                   flags, (struct sockaddr *)
+                                           &client_address, client_address_len);
+                ENSURE(sent_size == wrote_size);
+            }
+        n_packs_sent = 0;
     }
 }
 
@@ -321,29 +386,35 @@ int main(int argc, char **argv) {
     port = opts->port;
     bsize = opts->bsize;
     ctrl_port = opts->ctrl_port;
-    listening_addr = parse_host_and_port(opts->mcast_addr, opts->portstr);
     discover_addr = parse_host_and_port(opts->discover_addr,
                                         opts->ctrl_portstr);
+    rtime_u = opts->rtime * 1000; // microseconds
+
     ui_port = opts->ui_port;
 
     audio_pack_buffer = pb_init(bsize);
 
     st = init_stations();
 
+    curr_station = malloc(sizeof(station));
+
     pthread_t receiver;
     pthread_t printer;
     pthread_t discoverer;
     pthread_t manager;
+    pthread_t reporter;
 
     CHECK_ERRNO(pthread_create(&receiver, NULL, pack_receiver, NULL));
     CHECK_ERRNO(pthread_create(&printer, NULL, pack_printer, NULL));
     CHECK_ERRNO(pthread_create(&discoverer, NULL, station_discoverer, NULL));
     CHECK_ERRNO(pthread_create(&manager, NULL, ui_manager, NULL));
+    CHECK_ERRNO(pthread_create(&reporter, NULL, missing_reporter, NULL));
 
     CHECK_ERRNO(pthread_join(receiver, NULL));
     CHECK_ERRNO(pthread_join(discoverer, NULL));
     CHECK_ERRNO(pthread_join(printer, NULL));
     CHECK_ERRNO(pthread_join(manager, NULL));
+    CHECK_ERRNO(pthread_join(reporter, NULL));
 
     return 0;
 }

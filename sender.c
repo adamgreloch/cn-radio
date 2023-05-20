@@ -114,6 +114,7 @@ void *ctrl_listener() {
             case REXMIT:
                 memset(packs, 0, CTRL_BUF_SIZE);
                 parse_rexmit(buffer, packs, &n_packs);
+                fprintf(stderr, "got rexmit!\n");
 //                rs_add(rq, packs, n_packs);
                 break;
         }

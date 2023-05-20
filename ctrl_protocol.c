@@ -25,6 +25,7 @@ int write_reply(char *buf, char* mcast_addr_str, uint16_t port,
 }
 
 int write_rexmit(char *buf, uint64_t *packs, uint64_t n_packs) {
+    if (n_packs == 0) return 0;
     size_t wrote = sprintf(buf, "%s ", REXMIT_STR);
 
     for (uint64_t i = 0; i < n_packs - 1; i++)

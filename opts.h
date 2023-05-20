@@ -87,6 +87,8 @@ struct receiver_opts {
 typedef struct receiver_opts receiver_opts;
 
 // TODO handle all incorrect args
+// TODO add ANSI check for name
+// TODO add -n argument for receiver
 
 inline static sender_opts *get_sender_opts(int argc, char **argv) {
     sender_opts *opts = malloc(sizeof(sender_opts));
@@ -196,8 +198,6 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
     sprintf(opts->discover_addr, "%s", DISCOVER_ADDR);
     opts->ui_port = UI_PORT;
 
-    int aflag = 0;
-
     int errflag = 0;
 
     int c;
@@ -206,13 +206,8 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
 
     size_t port;
 
-    while ((c = getopt(argc, argv, "a:b:P:d:C:R:U:")) != -1) {
+    while ((c = getopt(argc, argv, "b:P:d:C:R:U:")) != -1) {
         switch (c) {
-            case 'a':
-                aflag = 1;
-                memset(opts->mcast_addr, 0, sizeof(opts->mcast_addr));
-                memcpy(opts->mcast_addr, optarg, strlen(optarg));
-                break;
             case 'd':
                 memset(opts->discover_addr, 0, sizeof(opts->discover_addr));
                 memcpy(opts->discover_addr, optarg, strlen(optarg));
@@ -263,7 +258,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 } else opts->port = port;
                 break;
             case '?':
-                if (optopt == 'a' || optopt == 'b' || optopt == 'P'
+                if (optopt == 'b' || optopt == 'P'
                     || optopt == 'd' || optopt == 'C' || optopt == 'R'
                     || optopt == 'U')
                     fprintf(stderr, "Option -%c requires an argument.\n",
@@ -279,12 +274,6 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
             default:
                 exit(1);
         }
-    }
-
-    if (aflag == 0) {
-        fprintf(stderr, "Usage: ./sikradio-receiver "
-                        "-a <mcast_addr>\n");
-        errflag = 1;
     }
 
     if (errflag == 1) {

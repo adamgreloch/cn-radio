@@ -20,8 +20,17 @@ struct audio_pack {
     byte *audio_data;
 } __attribute__((__packed__));
 
+inline static int open_socket() {
+    int socket_fd = socket(PF_INET, SOCK_DGRAM, 0);
+    if (socket_fd < 0) {
+        PRINT_ERRNO();
+    }
+
+    return socket_fd;
+}
+
 inline static int create_socket(uint16_t port) {
-    int socket_fd = socket(AF_INET, SOCK_DGRAM, 0); // creating IPv4 UDP socket
+    int socket_fd = open_socket();
     ENSURE(socket_fd > 0);
     // after socket() call; we should close(sock) on any execution path;
 

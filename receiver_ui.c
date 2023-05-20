@@ -132,7 +132,7 @@ update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
         st->current = st->data[0];
         st->current_pos = 0;
         st->change_pending = true;
-        CHECK_ERRNO(pthread_cond_signal(&st->wait_for_found));
+        CHECK_ERRNO(pthread_cond_broadcast(&st->wait_for_found));
     }
 
     _sort_stations(st);
@@ -201,7 +201,7 @@ bool switch_if_changed(stations *st, station **new_station) {
     bool res = false;
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     if (st->change_pending) {
-        memcpy(*new_station, st->current, sizeof(station));
+        *new_station = st->current;
         st->change_pending = false;
         CHECK_ERRNO(pthread_cond_signal(&st->wait_for_change));
         res = true;
@@ -212,24 +212,26 @@ bool switch_if_changed(stations *st, station **new_station) {
 
 void delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
-    uint64_t now = time(NULL);
-    uint64_t prev_count = st->count;
-    for (size_t i = 0; i < prev_count; i++)
-        if (now - st->data[i]->last_heard >= inactivity_sec) {
-            if (st->data[i] == st->current)
-                st->current = NULL;
-            free(st->data[i]);
-            st->data[i] = NULL;
-            st->count--;
-        }
+    if (st->count > 0) {
+        uint64_t now = time(NULL);
+        uint64_t prev_count = st->count;
+        for (size_t i = 0; i < prev_count; i++)
+            if (now - st->data[i]->last_heard >= inactivity_sec) {
+                if (st->data[i] == st->current)
+                    st->current = NULL;
+                free(st->data[i]);
+                st->data[i] = NULL;
+                st->count--;
+            }
 
-    _sort_stations(st);
+        _sort_stations(st);
+    }
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
 
 void remove_current_for_inactivity(stations *st) {
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
-    if (!st->change_pending) {
+    if (!st->change_pending && st->count > 0) {
         free(st->current);
         st->current = NULL;
         st->data[st->current_pos] = NULL;
