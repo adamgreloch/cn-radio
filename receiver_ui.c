@@ -1,4 +1,5 @@
 #include "receiver_ui.h"
+#include "receiver_utils.h"
 #include "err.h"
 #include <pthread.h>
 #include <stdlib.h>
@@ -14,7 +15,7 @@ struct stations {
     uint64_t size;
 
     bool change_pending;
-    station* current;
+    station *current;
     uint64_t current_pos;
 
     char *ui_buffer;
@@ -45,7 +46,7 @@ stations *init_stations() {
     return st;
 }
 
-int _str_compare(char *name1, char* name2) {
+int _str_compare(char *name1, char *name2) {
     size_t pos = 0;
 
     while (true) {
@@ -72,7 +73,7 @@ int _station_compare(const void *a, const void *b) {
 }
 
 void _sort_stations(stations *st) {
-    qsort(st->data, st->size, sizeof(station*), _station_compare);
+    qsort(st->data, st->size, sizeof(station *), _station_compare);
 
     uint64_t i = 0;
     // TODO optimize to binsearch
@@ -105,10 +106,10 @@ update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
             if (empty == st->size + 1)
                 empty = i;
         }
-        // do the equality comparisons from cheapest to most expensive
+            // do the equality comparisons from cheapest to most expensive
         else if (st->data[i]->port == port &&
-                _str_compare(mcast_addr_str, st->data[i]->mcast_addr) == 0
-                && _str_compare(name, st->data[i]->name) == 0) {
+                 _str_compare(mcast_addr_str, st->data[i]->mcast_addr) == 0
+                 && _str_compare(name, st->data[i]->name) == 0) {
             // station rediscovered, just update activity time
             st->data[i]->last_heard = time(NULL);
             found = true;
@@ -247,3 +248,163 @@ void wait_until_any_station_found(stations *st) {
         CHECK_ERRNO(pthread_cond_wait(&st->wait_for_found, &st->mutex));
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
+
+void *ui_manager(void *args) {
+    receiver_data *rd = args;
+
+    int pd_size = INIT_PD_SIZE;
+
+    struct pollfd *pd = calloc(pd_size, sizeof(struct pollfd));
+    bool *negotiated = calloc(pd_size, sizeof(bool));
+
+    // initialize client socket table, pd[0] is a central socket
+    for (int i = 0; i < pd_size; i++) {
+        pd[i].fd = -1;
+        pd[i].events = POLLIN | POLLOUT;
+        pd[i].revents = 0;
+    }
+
+    pd[0].fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (pd[0].fd < 0) {
+        PRINT_ERRNO();
+    }
+
+    uint64_t ui_buffer_size = UI_BUF_SIZE;
+    char *ui_buffer = malloc(sizeof(UI_BUF_SIZE) * ui_buffer_size);
+    if (!ui_buffer)
+        fatal("malloc");
+
+    char *nav_buffer = malloc(NAV_BUF_SIZE);
+    if (!nav_buffer)
+        fatal("malloc");
+
+    bind_socket(pd[0].fd, rd->ui_port);
+
+    start_listening(pd[0].fd, QUEUE_LENGTH);
+
+    while (true) {
+        for (int i = 0; i < pd_size; i++) {
+            pd[i].revents = 0;
+        }
+
+        sleep(1);
+        int poll_status = poll(pd, pd_size, TIMEOUT);
+        if (poll_status == -1)
+            PRINT_ERRNO();
+        else if (poll_status > 0) {
+            if (pd[0].revents & POLLIN) {
+                // Accept new connection
+                int client_fd = accept_connection(pd[0].fd, NULL);
+
+                bool accepted = false;
+                for (int i = 1; i < pd_size; i++) {
+                    if (pd[i].fd == -1) {
+                        pd[i].fd = client_fd;
+                        accepted = true;
+                        break;
+                    }
+                }
+
+                if (!accepted) {
+                    // pd table is too small. Resize it
+                    pd_size *= 2;
+                    pd = realloc(pd, pd_size);
+                    if (!pd)
+                        fatal("realloc");
+                    pd[pd_size].fd = client_fd;
+                }
+            }
+
+            for (int i = 1; i < pd_size; i++) {
+                if (pd[i].fd != -1 &&
+                    (pd[i].revents & (POLLIN | POLLERR))) {
+                    ssize_t received_bytes = read(pd[i].fd, nav_buffer,
+                                                  NAV_BUF_SIZE);
+                    if (received_bytes < 0) {
+                        // Error when reading message from connection
+                        pd[i].fd = -1;
+                    } else if (received_bytes == 0) {
+                        // Client has closed connection
+                        CHECK_ERRNO(close(pd[i].fd));
+                        pd[i].fd = -1;
+                    } else
+                        handle_input(nav_buffer, rd->st);
+                }
+                if (pd[i].fd != -1 &&
+                    (pd[i].revents & (POLLOUT))) {
+                    ssize_t sent;
+                    memset(ui_buffer, 0, UI_BUF_SIZE);
+                    if (!negotiated[i]) {
+                        negotiate_telnet(pd[i].fd, ui_buffer);
+                        negotiated[i] = true;
+                    } else {
+                        size_t ui_len;
+                        print_ui(&ui_buffer, &ui_buffer_size, &ui_len, rd->st);
+                        sent = write(pd[i].fd, ui_buffer, ui_len);
+                        ENSURE(sent == (ssize_t) ui_len);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void *station_discoverer(void *args) {
+    receiver_data *rd = args;
+
+    int ctrl_sock_fd = create_socket(rd->ctrl_port);
+    enable_broadcast(ctrl_sock_fd);
+
+    char *write_buffer = malloc(CTRL_BUF_SIZE);
+    if (!write_buffer)
+        fatal("malloc");
+
+    int wrote_size;
+    ssize_t sent_size;
+    ssize_t recv_size;
+    int flags = 0;
+    errno = 0;
+
+    socklen_t discover_addr_len = (socklen_t) sizeof(rd->discover_addr);
+
+    struct sockaddr_in sender_addr;
+    socklen_t sender_addr_len = (socklen_t) sizeof(sender_addr);
+
+    char mcast_addr_str[20];
+    uint16_t sender_port;
+    char sender_name[64 + 1];
+
+    while (true) {
+        memset(write_buffer, 0, CTRL_BUF_SIZE);
+
+        wrote_size = write_lookup(write_buffer);
+        sent_size = sendto(ctrl_sock_fd, write_buffer, wrote_size,
+                           flags, (struct sockaddr *)
+                                   &rd->discover_addr, discover_addr_len);
+        ENSURE(sent_size == wrote_size);
+
+        sleep(DISCOVER_SLEEP);
+
+        memset(write_buffer, 0, CTRL_BUF_SIZE);
+
+        while ((recv_size = recvfrom(ctrl_sock_fd, write_buffer, CTRL_BUF_SIZE,
+                                     MSG_DONTWAIT,
+                                     (struct sockaddr *) &sender_addr,
+                                     &sender_addr_len)) > 0) {
+            if (what_message(write_buffer) == REPLY) {
+                parse_reply(write_buffer, recv_size, mcast_addr_str,
+                            &sender_port,
+                            sender_name);
+                update_station(rd->st, mcast_addr_str, sender_port,
+                               sender_name);
+            }
+
+            memset(mcast_addr_str, 0, sizeof(mcast_addr_str));
+            memset(sender_name, 0, sizeof(sender_name));
+            memset(write_buffer, 0, CTRL_BUF_SIZE);
+        }
+
+        delete_inactive_stations(rd->st, INACTIVITY_THRESH);
+    }
+}
+

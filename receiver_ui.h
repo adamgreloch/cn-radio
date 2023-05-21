@@ -41,4 +41,8 @@ void remove_current_for_inactivity(stations *st);
 
 void wait_until_any_station_found(stations *st);
 
+void *ui_manager(void *args);
+
+void *station_discoverer(void *args);
+
 #endif //_RECEIVER_UI_

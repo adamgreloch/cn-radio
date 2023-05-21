@@ -7,6 +7,22 @@
 #include <netdb.h>
 #include "err.h"
 
+#define UDP_IPV4_DATASIZE 65507
+
+#define max(a, b)             \
+({                           \
+    __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+    _a > _b ? _a : _b;       \
+})
+
+#define min(a, b)             \
+({                           \
+    __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+    _a < _b ? _a : _b;       \
+})
+
 typedef uint8_t byte;
 
 struct audio_pack {
