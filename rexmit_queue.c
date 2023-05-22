@@ -1,8 +1,6 @@
 #include "rexmit_queue.h"
 #include <pthread.h>
 
-// TODO null proof the code
-
 struct addr_list {
     struct sockaddr_and_len addr;
     struct addr_list *next;
@@ -72,6 +70,7 @@ rexmit_queue *rq_init(uint64_t psize, uint64_t fsize) {
 }
 
 void rq_add_pack(rexmit_queue *rq, byte *pack_data, uint64_t first_byte_num) {
+    if (!rq || !pack_data) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
     if (!(*rq->head)) {
         *rq->head = malloc(sizeof(queue_elem));
@@ -135,6 +134,8 @@ void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num,
 
 void rq_bind_addr(rexmit_queue *rq, uint64_t *packs, uint64_t n_packs, struct
         sockaddr_and_len *receiver_addr) {
+    if (!rq || !packs) fatal("null argument");
+    if (n_packs == 0) return;
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
     for (size_t i = 0; i < n_packs; i++)
         _bind_addr_to_pack(rq, packs[i], receiver_addr);
@@ -143,6 +144,7 @@ void rq_bind_addr(rexmit_queue *rq, uint64_t *packs, uint64_t n_packs, struct
 
 void rq_get_head_tail_byte_nums(rexmit_queue *rq, uint64_t *head_byte_num,
                                 uint64_t *tail_byte_num) {
+    if (!rq) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
     *head_byte_num = rq->head_byte_num;
     *tail_byte_num = rq->tail_byte_num;
@@ -161,6 +163,7 @@ addr_list *_pop_from_list(queue_elem *qe) {
 
 void rq_peek_pack_with_addrs(rexmit_queue *rq, uint64_t first_byte_num, byte
 *pack_data, struct sockaddr_and_len **receiver_addrs, uint64_t *addr_count) {
+    if (!rq) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
     queue_elem *qe = _find_elem(rq, first_byte_num);
     if (*addr_count < qe->list_len) {
