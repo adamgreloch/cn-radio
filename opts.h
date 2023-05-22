@@ -15,6 +15,7 @@
 #define DATA_PORT (20000 + (NUM % 10000))
 #define CTRL_PORT (30000 + (NUM % 10000))
 #define DEFAULT_BSIZE 65536
+#define DEFAULT_FSIZE 131072
 #define DEFAULT_RTIME 250
 #define DEFAULT_NAME "Nienazwany Nadajnik"
 #define MAX_NAME_LEN 64
@@ -27,7 +28,10 @@ struct sender_opts {
     uint16_t port;
 
     /** audio_data size (set with -p) defaults to @p DEFAULT_PSIZE */
-    uint32_t psize;
+    uint64_t psize;
+
+    /** FIFO size (set with -f) defaults to @p DEFAULT_FSIZE */
+    uint64_t fsize;
 
     /** port used for control protocol with receivers
      * set with option -C, defaults to @p DEFAULT_CTRL
@@ -81,7 +85,7 @@ struct receiver_opts {
     uint64_t rtime;
 
     /** buffer size (set with -b) defaults to @p DEFAULT_BSIZE */
-    uint32_t bsize;
+    uint64_t bsize;
 };
 
 typedef struct receiver_opts receiver_opts;
@@ -98,6 +102,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
     sprintf(opts->sender_name, "%s", DEFAULT_NAME);
     opts->ctrl_port = CTRL_PORT;
     opts->rtime = DEFAULT_RTIME;
+    opts->fsize = DEFAULT_FSIZE;
 
     int aflag = 0;
     int errflag = 0;
@@ -107,7 +112,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
 
     opterr = 0;
 
-    while ((c = getopt(argc, argv, "a:n:p:P:C:R:")) != -1) {
+    while ((c = getopt(argc, argv, "a:n:p:P:C:R:F:")) != -1) {
         switch (c) {
             case 'a':
                 aflag = 1;
@@ -140,9 +145,16 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
                 }
                 break;
             case 'p':
-                opts->psize = strtoul(optarg, NULL, 10);
+                opts->psize = strtoull(optarg, NULL, 10);
                 if (opts->psize == 0) {
                     fprintf(stderr, "Invalid audio_pack size: %s\n", optarg);
+                    errflag = 1;
+                }
+                break;
+            case 'F':
+                opts->psize = strtoull(optarg, NULL, 10);
+                if (opts->fsize == 0) {
+                    fprintf(stderr, "Invalid FIFO size: %s\n", optarg);
                     errflag = 1;
                 }
                 break;
@@ -240,7 +252,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 }
                 break;
             case 'b':
-                opts->bsize = strtoul(optarg, NULL, 10);
+                opts->bsize = strtoull(optarg, NULL, 10);
                 if (opts->bsize == 0) {
                     fprintf(stderr, "Invalid buffer size: %s\n", optarg);
                     errflag = 1;

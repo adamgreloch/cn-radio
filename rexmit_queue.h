@@ -32,18 +32,15 @@ sockaddr_and_len* receiver_addr);
 /**
  * Pops a pack with the addresses that have requested its retransmission.
  */
-uint64_t rq_peek_pack_with_addrs(rexmit_queue *rq, uint64_t first_byte_num,
-                                 struct audio_pack *pack,
-                                 struct sockaddr_and_len **receiver_addrs,
-                                 uint64_t *addrs_size);
-
+bool rq_pop_pack_for_addr(rexmit_queue *rq, byte *pack_data,
+                          uint64_t *first_byte_num,
+                          struct sockaddr_and_len *receiver_addr);
 /**
  * Adds a pack to the queue. If there is not enough space in the queue,
  * removes the oldest pack from the queue. Assumes pack has exactly
  * PSIZE bytes.
  */
-void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack, uint64_t
-first_byte_num);
+void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack);
 
 void rq_get_head_tail_byte_nums(rexmit_queue *rq, uint64_t *head_byte_num,
                                 uint64_t *tail_byte_num);

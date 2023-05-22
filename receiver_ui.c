@@ -1,10 +1,10 @@
+#include <pthread.h>
+#include <stdlib.h>
+#include <poll.h>
 #include "receiver_ui.h"
 #include "receiver_utils.h"
 #include "err.h"
 #include "ctrl_protocol.h"
-#include <pthread.h>
-#include <stdlib.h>
-#include <poll.h>
 
 char line_break[] = "------------------------------------------------------------------------\r\n";
 

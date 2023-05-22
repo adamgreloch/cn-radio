@@ -15,8 +15,10 @@ struct sockaddr_in mcast_addr;
 
 uint16_t port;
 uint16_t ctrl_port;
-uint32_t psize;
+uint64_t psize;
+uint64_t fsize;
 uint64_t rtime_u;
+uint64_t session_id;
 
 bool finished = false;
 
@@ -49,8 +51,6 @@ void send_pack(int socket_fd, const struct sockaddr_in *dest_address,
 }
 
 void *pack_sender() {
-    uint64_t session_id = time(NULL);
-
     uint64_t pack_num = 0;
 
     byte *read_bytes = (byte *) malloc(psize);
@@ -66,6 +66,7 @@ void *pack_sender() {
             pack.audio_data = read_bytes;
 
             send_pack(mcast_send_sock_fd, &mcast_addr, &pack, psize);
+            rq_add_pack(rq, &pack);
 
             pack_num++;
         } else break;
@@ -135,26 +136,24 @@ void *pack_retransmitter() {
     int send_sock_fd = open_socket();
     bind_socket(send_sock_fd, 0); // bind to any port
 
-    uint64_t head_bn, tail_bn;
+    byte* audio_data = malloc(psize);
+    uint64_t list_len = 0;
+    uint64_t first_byte_num;
+
     struct audio_pack pack;
 
-    sockaddr_and_len* receiver_addrs = NULL;
-    uint64_t addrs_size = 0;
-    uint64_t addr_count;
-
-    int wrote_size;
-    ssize_t sent_size;
-    int flags = 0;
-    errno = 0;
+    sockaddr_and_len receiver_addr;
 
     while (!finished) {
         usleep(rtime_u);
-        rq_get_head_tail_byte_nums(rq, &head_bn, &tail_bn);
-        for (size_t bn = tail_bn; bn <= head_bn; bn += psize) {
-            addr_count = rq_peek_pack_with_addrs(rq, bn, &pack,
-                                      &receiver_addrs, &addrs_size);
-            for (size_t i = 0; i < addr_count; i++)
-                send_pack(send_sock_fd, &receiver_addrs[i].addr, &pack, psize);
+        fprintf(stderr, "RTIME\n");
+        if (rq_pop_pack_for_addr(rq, audio_data, &first_byte_num,
+                                 &receiver_addr)) {
+            pack.first_byte_num = first_byte_num;
+            pack.session_id = session_id;
+            pack.audio_data = audio_data;
+            send_pack(send_sock_fd, &receiver_addr.addr, &pack, psize);
+            fprintf(stderr, "retransmitted %lu\n", first_byte_num);
         }
     }
     return 0;
@@ -168,6 +167,8 @@ int main(int argc, char **argv) {
     psize = opts->psize;
     sender_name = opts->sender_name;
     rtime_u = opts->rtime * 1000; // microseconds
+    fsize = opts->fsize;
+    session_id = time(NULL);
 
     send_buffer = calloc(psize + 16, 1);
     if (!send_buffer)
@@ -175,6 +176,7 @@ int main(int argc, char **argv) {
 
     check_address(opts->mcast_addr_str);
     mcast_addr_str = opts->mcast_addr_str;
+    rq = rq_init(psize, fsize);
 
     mcast_send_sock_fd = socket(PF_INET, SOCK_DGRAM, 0);
     mcast_addr = get_send_address(mcast_addr_str, port);

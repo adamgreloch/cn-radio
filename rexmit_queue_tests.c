@@ -12,7 +12,7 @@ int main() {
         pack.first_byte_num = psize * i;
         sprintf((char*) data, "%d", psize * i);
         pack.audio_data = data;
-        rq_add_pack(rq, &pack, psize * i);
+        rq_add_pack(rq, &pack);
     }
 
     uint64_t n_packs = 5;
@@ -47,14 +47,24 @@ int main() {
 
     struct audio_pack res;
 
-    for (uint64_t bn = tail_bn; bn <= head_bn; bn += psize) {
-        rq_peek_pack_with_addrs(rq, bn, &res, &receiver_addrs, &addr_count);
+    byte* audio_data = malloc(psize);
+    uint64_t list_len = 0;
+    uint64_t first_byte_num;
+
+    uint64_t session_id = 0;
+
+    while (rq_pop_pack_for_addr(rq, audio_data, &first_byte_num,
+                             &receiver_addr)) {
+        pack.first_byte_num = first_byte_num;
+        pack.session_id = session_id;
+        pack.audio_data = audio_data;
+        fprintf(stderr, "retransmitted %lu\n", first_byte_num);
     }
 
     for (int i = 25; i < 50; i++) {
         pack.first_byte_num = psize * i;
         sprintf((char*) data, "%d", psize * i);
         pack.audio_data = data;
-        rq_add_pack(rq, &pack, psize * i);
+        rq_add_pack(rq, &pack);
     }
 }

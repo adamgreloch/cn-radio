@@ -5,16 +5,20 @@ CFLAGS = -Wall -Wextra -O2 -pthread
 
 all: $(TARGETS)
 
-pack_buffer.o: common.h pack_buffer.h pack_buffer.c
+# TODO add headers
+
+pack_buffer.o: pack_buffer.c
 
 ctrl_protocol.o: ctrl_protocol.c
 
 receiver_ui.o: receiver_ui.c
 
-sikradio-receiver: pack_buffer.o ctrl_protocol.o receiver_ui.o opts.h err.h common.h receiver_utils.h receiver.c
+rexmit_queue.o: rexmit_queue.c
+
+sikradio-receiver: pack_buffer.o ctrl_protocol.o receiver_ui.o receiver.c
 	$(CC) $^ -o $@ $(CFLAGS)
 
-sikradio-sender: opts.h ctrl_protocol.o err.h common.h sender.c 
+sikradio-sender: ctrl_protocol.o rexmit_queue.o sender.c
 	$(CC) $^ -o $@ $(CFLAGS)
 
 .PHONY: clean

@@ -234,12 +234,13 @@ void take_pack_if_present_else_reset(pack_buffer *pb, void *item) {
         memcpy(item, pb->tail, pb->psize);
         pb->is_present[pb->tail - pb->buf] = false;
 
-        if (pb->head != pb->tail) {
-            pb->tail += pb->psize;
-            handle_buf_end_overlap(&pb->tail, pb);
-        }
-    } else
-        reset_buffer(pb, pb->head_byte_num);
+    }
+    if (pb->head != pb->tail) {
+        pb->tail += pb->psize;
+        handle_buf_end_overlap(&pb->tail, pb);
+    }
+//    else
+//        reset_buffer(pb, pb->head_byte_num);
 }
 
 uint64_t pb_pop_front(pack_buffer *pb, void *item) {
