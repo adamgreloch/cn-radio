@@ -1,6 +1,7 @@
 #include "receiver_ui.h"
 #include "receiver_utils.h"
 #include "err.h"
+#include "ctrl_protocol.h"
 #include <pthread.h>
 #include <stdlib.h>
 
@@ -84,6 +85,7 @@ void _sort_stations(stations *st) {
 
 void
 update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
+    if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
 
     while (st->change_pending)
@@ -142,6 +144,7 @@ update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
 }
 
 void _move_selection(stations *st, int delta) {
+    if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     if (st->count > 1) {
         st->current_pos = (st->current_pos + st->count + delta) % st->count;
@@ -152,6 +155,7 @@ void _move_selection(stations *st, int delta) {
 }
 
 void print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
+    if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     size_t wrote = 0;
     memset(st->ui_buffer, 0, st->ui_buffer_size);
@@ -199,6 +203,7 @@ void select_station_down(stations *st) {
 }
 
 bool switch_if_changed(stations *st, station **new_station) {
+    if (!st) fatal("null argument");
     bool res = false;
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     if (st->change_pending) {
@@ -212,6 +217,7 @@ bool switch_if_changed(stations *st, station **new_station) {
 }
 
 void delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
+    if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     if (st->count > 0) {
         uint64_t now = time(NULL);
@@ -231,6 +237,7 @@ void delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
 }
 
 void remove_current_for_inactivity(stations *st) {
+    if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     if (!st->change_pending && st->count > 0) {
         free(st->current);
@@ -243,6 +250,7 @@ void remove_current_for_inactivity(stations *st) {
 }
 
 void wait_until_any_station_found(stations *st) {
+    if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     while (!st->current)
         CHECK_ERRNO(pthread_cond_wait(&st->wait_for_found, &st->mutex));

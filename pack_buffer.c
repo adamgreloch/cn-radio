@@ -49,6 +49,7 @@ void reset_buffer(pack_buffer *pb, uint64_t byte_zero) {
 }
 
 void pb_reset(pack_buffer *pb, uint64_t psize, uint64_t byte_zero) {
+    if (!pb) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
     reset_buffer(pb, byte_zero);
     pb->psize = psize;
@@ -62,6 +63,7 @@ void handle_buf_end_overlap(byte **pos, pack_buffer *pb) {
 
 void pb_find_missing(pack_buffer *pb, uint64_t *n_packs,
                      uint64_t **missing_buf, uint64_t *buf_size) {
+    if (!pb) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
     size_t exp_size = sizeof(uint64_t) * pb->capacity / pb->psize;
 
@@ -214,6 +216,7 @@ bool is_in_buffer(pack_buffer *pb, uint64_t first_byte_num) {
 
 void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
                   uint64_t psize) {
+    if (!pb) fatal("null argument");
     if (pb->psize != psize) return;
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
 
@@ -240,6 +243,7 @@ void take_pack_if_present_else_reset(pack_buffer *pb, void *item) {
 }
 
 uint64_t pb_pop_front(pack_buffer *pb, void *item) {
+    if (!pb) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
 
     while (pb->head == pb->tail ||
