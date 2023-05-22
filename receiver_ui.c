@@ -4,6 +4,7 @@
 #include "ctrl_protocol.h"
 #include <pthread.h>
 #include <stdlib.h>
+#include <poll.h>
 
 char line_break[] = "------------------------------------------------------------------------\r\n";
 

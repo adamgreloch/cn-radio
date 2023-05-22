@@ -9,7 +9,7 @@ struct addr_list {
 typedef struct addr_list addr_list;
 
 struct queue_elem {
-    byte *data;
+    struct audio_pack *pack;
 
     addr_list *tail;
     addr_list *head;
@@ -69,12 +69,13 @@ rexmit_queue *rq_init(uint64_t psize, uint64_t fsize) {
     return rq;
 }
 
-void rq_add_pack(rexmit_queue *rq, byte *pack_data, uint64_t first_byte_num) {
-    if (!rq || !pack_data) fatal("null argument");
+void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack, uint64_t
+first_byte_num) {
+    if (!rq || !pack) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
     if (!(*rq->head)) {
         *rq->head = malloc(sizeof(queue_elem));
-        (*rq->head)->data = malloc(rq->psize);
+        (*rq->head)->pack = malloc(rq->psize);
     }
 
     if (rq->head == rq->tail && rq->count > 0) {
@@ -88,7 +89,8 @@ void rq_add_pack(rexmit_queue *rq, byte *pack_data, uint64_t first_byte_num) {
     }
 
     queue_elem *qe = *rq->head;
-    memcpy(qe->data, pack_data, rq->psize);
+    memcpy(qe->pack, pack, rq->psize + 16);
+
     qe->tail = qe->head = NULL;
 
     rq->head_byte_num = first_byte_num;
@@ -161,15 +163,22 @@ addr_list *_pop_from_list(queue_elem *qe) {
     return popped;
 }
 
-void rq_peek_pack_with_addrs(rexmit_queue *rq, uint64_t first_byte_num, byte
-*pack_data, struct sockaddr_and_len **receiver_addrs, uint64_t *addr_count) {
+uint64_t rq_peek_pack_with_addrs(rexmit_queue *rq, uint64_t first_byte_num,
+                                 struct audio_pack *pack,
+                                 struct sockaddr_and_len **receiver_addrs,
+                                 uint64_t *addrs_size) {
     if (!rq) fatal("null argument");
+    uint64_t count;
+
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
     queue_elem *qe = _find_elem(rq, first_byte_num);
-    if (*addr_count < qe->list_len) {
-        *receiver_addrs = realloc(*receiver_addrs, qe->list_len * sizeof
+
+    if (*addrs_size < qe->list_len) {
+        *addrs_size = max(2 * (*addrs_size), 1);
+        *receiver_addrs = realloc(*receiver_addrs, *addrs_size * sizeof
                 (receiver_addrs));
-        *addr_count = qe->list_len;
+        if (!(*receiver_addrs))
+            fatal("realloc");
     }
 
     addr_list *al;
@@ -180,6 +189,9 @@ void rq_peek_pack_with_addrs(rexmit_queue *rq, uint64_t first_byte_num, byte
         (*receiver_addrs)[i++] = al->addr;
     }
 
-    memcpy(pack_data, qe->data, rq->psize);
+    memcpy(pack, qe->pack, rq->psize + 16);
+    count = qe->list_len;
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
+
+    return count;
 }

@@ -60,11 +60,10 @@ inline static receiver_data *rd_init(int argc, char **argv) {
     return rd;
 }
 
-// IAC DO LINEMODE, IAC SB LINEMODE MODE 0 IAC SE, IAC WILL ECHO
-char telnet_negotation[] = {255, 253, 34, 255, 250, 34, 1, 0, 255, 240, 255,
-                            251, 1};
-
 inline static void negotiate_telnet(int fd, char *buf) {
+    // IAC DO LINEMODE, IAC SB LINEMODE MODE 0 IAC SE, IAC WILL ECHO
+    char telnet_negotation[] = {255, 253, 34, 255, 250, 34, 1, 0, 255, 240,
+                                255, 251, 1};
     for (size_t i = 0; i < sizeof(telnet_negotation); i++)
         buf[i] = telnet_negotation[i];
     ssize_t sent = write(fd, buf, sizeof(telnet_negotation));
@@ -98,8 +97,9 @@ inline static int create_recv_socket(uint16_t port, struct sockaddr_in
     return socket_fd;
 }
 
-size_t receive_pack(int socket_fd, struct audio_pack **pack, byte *buffer,
-                    uint64_t *psize, receiver_data *rd) {
+inline static size_t receive_pack(int socket_fd, struct audio_pack **pack, byte
+*buffer,
+                                  uint64_t *psize, receiver_data *rd) {
     ssize_t read_length;
     int flags = 0;
     errno = 0;

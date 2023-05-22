@@ -4,11 +4,15 @@ int main() {
     int psize = 4;
     int fsize = 25;
     rexmit_queue *rq = rq_init(psize, fsize);
-    byte *pack = malloc(psize);
+    struct audio_pack pack;
+    byte *data = malloc(psize);
+    pack.session_id = 0;
 
     for (int i = 0; i < 25; i++) {
-        sprintf((char*) pack, "%d", psize * i);
-        rq_add_pack(rq, pack, psize * i);
+        pack.first_byte_num = psize * i;
+        sprintf((char*) data, "%d", psize * i);
+        pack.audio_data = data;
+        rq_add_pack(rq, &pack, psize * i);
     }
 
     uint64_t n_packs = 5;
@@ -41,14 +45,16 @@ int main() {
 
     rq_get_head_tail_byte_nums(rq, &head_bn, &tail_bn);
 
-    byte *buf = malloc(psize);
+    struct audio_pack res;
 
     for (uint64_t bn = tail_bn; bn <= head_bn; bn += psize) {
-        rq_peek_pack_with_addrs(rq, bn, buf, &receiver_addrs, &addr_count);
+        rq_peek_pack_with_addrs(rq, bn, &res, &receiver_addrs, &addr_count);
     }
 
     for (int i = 25; i < 50; i++) {
-        sprintf((char*) pack, "%d", psize * i);
-        rq_add_pack(rq, pack, psize * i);
+        pack.first_byte_num = psize * i;
+        sprintf((char*) data, "%d", psize * i);
+        pack.audio_data = data;
+        rq_add_pack(rq, &pack, psize * i);
     }
 }

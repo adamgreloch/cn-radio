@@ -6,7 +6,7 @@
 #include "common.h"
 #include "opts.h"
 #include "ctrl_protocol.h"
-//#include "rexmit_queue.h"
+#include "rexmit_queue.h"
 
 char *sender_name;
 char *mcast_addr_str;
@@ -22,7 +22,7 @@ bool finished = false;
 
 char *send_buffer;
 
-//rexmit_queue *rq;
+rexmit_queue *rq;
 
 size_t read_pack(FILE *stream, uint64_t pack_size, byte *data) {
     return fread(data, sizeof(byte), pack_size, stream);
@@ -94,6 +94,8 @@ void *ctrl_listener() {
     int wrote_size;
     ssize_t sent_size;
 
+    sockaddr_and_len receiver_sal;
+
     while (!finished) {
         memset(buffer, 0, CTRL_BUF_SIZE);
 
@@ -115,7 +117,11 @@ void *ctrl_listener() {
                 memset(packs, 0, CTRL_BUF_SIZE);
                 parse_rexmit(buffer, packs, &n_packs);
                 fprintf(stderr, "got rexmit!\n");
-//                rs_add(rq, packs, n_packs);
+
+                receiver_sal.addr = receiver_addr;
+                receiver_sal.addr_len = address_length;
+
+                rq_bind_addr(rq, packs, n_packs, &receiver_sal);
                 break;
         }
     }
@@ -126,11 +132,30 @@ void *ctrl_listener() {
 }
 
 void *pack_retransmitter() {
+    int send_sock_fd = open_socket();
+    bind_socket(send_sock_fd, 0); // bind to any port
+
+    uint64_t head_bn, tail_bn;
+    struct audio_pack pack;
+
+    sockaddr_and_len* receiver_addrs = NULL;
+    uint64_t addrs_size = 0;
+    uint64_t addr_count;
+
+    int wrote_size;
+    ssize_t sent_size;
+    int flags = 0;
+    errno = 0;
+
     while (!finished) {
         usleep(rtime_u);
-        // TODO retransmitting
-        //  * write FIFO
-        //  * write rs
+        rq_get_head_tail_byte_nums(rq, &head_bn, &tail_bn);
+        for (size_t bn = tail_bn; bn <= head_bn; bn += psize) {
+            addr_count = rq_peek_pack_with_addrs(rq, bn, &pack,
+                                      &receiver_addrs, &addrs_size);
+            for (size_t i = 0; i < addr_count; i++)
+                send_pack(send_sock_fd, &receiver_addrs[i].addr, &pack, psize);
+        }
     }
     return 0;
 }
