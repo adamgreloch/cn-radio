@@ -6,7 +6,7 @@
 #include "common.h"
 #include "opts.h"
 #include "ctrl_protocol.h"
-//#include "rexmit_set.h"
+//#include "rexmit_queue.h"
 
 char *sender_name;
 char *mcast_addr_str;
@@ -22,7 +22,7 @@ bool finished = false;
 
 char *send_buffer;
 
-//rexmit_set *rq;
+//rexmit_queue *rq;
 
 size_t read_pack(FILE *stream, uint64_t pack_size, byte *data) {
     return fread(data, sizeof(byte), pack_size, stream);

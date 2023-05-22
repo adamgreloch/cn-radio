@@ -2,8 +2,6 @@
 #include <pthread.h>
 #include <assert.h>
 
-const char missing_fmt[] = "MISSING: BEFORE %lu EXPECTED %lu\n";
-
 struct pack_buffer {
     byte *buf;                                        /**< data buffer */
     byte *buf_end;                             /**< end of data buffer */
