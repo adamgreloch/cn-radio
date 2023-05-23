@@ -32,10 +32,10 @@ struct receiver_data {
 
     stations *st;
 
-    station *curr_station;
-
     struct sockaddr_in client_address;
     socklen_t client_address_len;
+
+    pthread_mutex_t mutex;
 };
 
 typedef struct receiver_data receiver_data;
@@ -52,10 +52,11 @@ inline static receiver_data *rd_init(int argc, char **argv) {
     rd->ui_port = opts->ui_port;
     rd->pb = pb_init(rd->bsize);
     rd->st = init_stations();
-    rd->curr_station = malloc(sizeof(station));
 
     rd->client_address_len = (socklen_t) sizeof(rd->client_address);
     rd->last_session_id = 0;
+
+    CHECK_ERRNO(pthread_mutex_init(&rd->mutex, NULL));
 
     return rd;
 }
@@ -106,13 +107,17 @@ inline static size_t receive_pack(int socket_fd, struct audio_pack **pack, byte
 
     memset(buffer, 0, rd->bsize);
 
+    CHECK_ERRNO(pthread_mutex_lock(&rd->mutex));
     read_length = recvfrom(socket_fd, buffer, rd->bsize, flags, (struct sockaddr
     *) &rd->client_address, &rd->client_address_len);
+    CHECK_ERRNO(pthread_mutex_unlock(&rd->mutex));
 
-    if (read_length < 0) {
-        remove_current_for_inactivity(rd->st);
+    if (read_length < 0)
         return 0;
-    }
+//    {
+//        remove_current_for_inactivity(rd->st);
+//        return 0;
+//    }
 
     *psize = read_length - 16;
 

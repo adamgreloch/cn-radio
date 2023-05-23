@@ -17,6 +17,7 @@ struct pack_buffer {
 
     pthread_mutex_t mutex;
     pthread_cond_t byte_zero_wait;
+    pthread_cond_t init_wait;
 };
 
 pack_buffer *pb_init(uint64_t bsize) {
@@ -35,6 +36,7 @@ pack_buffer *pb_init(uint64_t bsize) {
 
     CHECK_ERRNO(pthread_mutex_init(&pb->mutex, NULL));
     CHECK_ERRNO(pthread_cond_init(&pb->byte_zero_wait, NULL));
+    CHECK_ERRNO(pthread_cond_init(&pb->init_wait, NULL));
 
     return pb;
 }
@@ -53,6 +55,7 @@ void pb_reset(pack_buffer *pb, uint64_t psize, uint64_t byte_zero) {
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
     reset_buffer(pb, byte_zero);
     pb->psize = psize;
+    CHECK_ERRNO(pthread_cond_signal(&pb->init_wait));
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 }
 
@@ -65,6 +68,10 @@ void pb_find_missing(pack_buffer *pb, uint64_t *n_packs,
                      uint64_t **missing_buf, uint64_t *buf_size) {
     if (!pb) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
+
+    while (pb->psize == 0)
+        CHECK_ERRNO(pthread_cond_wait(&pb->init_wait, &pb->mutex));
+
     size_t exp_size = sizeof(uint64_t) * pb->capacity / pb->psize;
 
     if (*buf_size != exp_size) {
@@ -113,7 +120,10 @@ void pb_find_missing(pack_buffer *pb, uint64_t *n_packs,
  * @param bytes - number of bytes to wipe
  */
 void wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
-    memset(ptr, 0, bytes);
+    if (ptr + bytes > pb->buf_end)
+        bytes -= ptr + bytes - pb->buf_end;
+
+    memset(ptr, 0, bytes % (pb->buf_end - ptr));
     uint64_t pos = ptr - pb->buf;
     assert(pos % pb->psize == 0);
     memset(pb->is_present + pos, 0, bytes);
@@ -234,13 +244,21 @@ void take_pack_if_present_else_reset(pack_buffer *pb, void *item) {
         memcpy(item, pb->tail, pb->psize);
         pb->is_present[pb->tail - pb->buf] = false;
 
+        if (pb->head != pb->tail) {
+            pb->tail += pb->psize;
+            handle_buf_end_overlap(&pb->tail, pb);
+        }
     }
-    if (pb->head != pb->tail) {
-        pb->tail += pb->psize;
-        handle_buf_end_overlap(&pb->tail, pb);
+    else {
+        // If nothing was present under the tail, wait in hope
+        // that missing packs will be soon retransmitted.
+        pb->byte_zero = pb->head_byte_num;
+        while (pb->head_byte_num - pb->byte_zero < pb->capacity / 4 * 3) {
+            fprintf(stderr, "pb wait\n");
+            CHECK_ERRNO(pthread_cond_wait(&pb->byte_zero_wait, &pb->mutex));
+            fprintf(stderr, "pb no wait\n");
+        }
     }
-//    else
-//        reset_buffer(pb, pb->head_byte_num);
 }
 
 uint64_t pb_pop_front(pack_buffer *pb, void *item) {

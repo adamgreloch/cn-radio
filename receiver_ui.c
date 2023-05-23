@@ -78,10 +78,11 @@ void _sort_stations(stations *st) {
     qsort(st->data, st->size, sizeof(station *), _station_compare);
 
     uint64_t i = 0;
-    // TODO optimize to binsearch
-    while (st->data[i] != st->current)
-        i++;
-    st->current_pos = i;
+    if (st->current) {
+        while (st->data[i] != st->current)
+            i++;
+        st->current_pos = i;
+    }
 }
 
 void
@@ -132,14 +133,17 @@ update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
         st->count++;
     }
 
+    _sort_stations(st);
+
     if (!st->current) {
         st->current = st->data[0];
         st->current_pos = 0;
         st->change_pending = true;
+        fprintf(stderr, "set current to %s\n", st->current->mcast_addr);
         CHECK_ERRNO(pthread_cond_broadcast(&st->wait_for_found));
     }
 
-    _sort_stations(st);
+    fprintf(stderr, "station %s updated\n", mcast_addr_str);
 
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
@@ -164,7 +168,7 @@ void print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
                      "\033[H\033[J%s SIK Radio\r\n%s", line_break, line_break);
 
     for (size_t i = 0; i < st->count; i++) {
-        if (wrote + 128 > st->ui_buffer_size) {
+        if (wrote + MAX_NAME_LEN + 16 > st->ui_buffer_size) {
             st->ui_buffer_size *= 2;
             st->ui_buffer = realloc(st->ui_buffer, st->ui_buffer_size);
             if (!st->ui_buffer)
@@ -203,14 +207,21 @@ void select_station_down(stations *st) {
     _move_selection(st, 1);
 }
 
-bool switch_if_changed(stations *st, station **new_station) {
+bool switch_if_changed(stations *st, station *new_station) {
     if (!st) fatal("null argument");
     bool res = false;
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
+
+    while (!st->current) {
+        fprintf(stderr, "wait switch if changed\n");
+        CHECK_ERRNO(pthread_cond_wait(&st->wait_for_found, &st->mutex));
+        fprintf(stderr, "wake switch if changed\n");
+    }
+
     if (st->change_pending) {
-        *new_station = st->current;
+        *new_station = *st->current;
         st->change_pending = false;
-        CHECK_ERRNO(pthread_cond_signal(&st->wait_for_change));
+        CHECK_ERRNO(pthread_cond_broadcast(&st->wait_for_change));
         res = true;
     }
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
@@ -220,11 +231,18 @@ bool switch_if_changed(stations *st, station **new_station) {
 void delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
     if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
+    while (st->change_pending) {
+        fprintf(stderr, "wait for change inactive\n");
+        CHECK_ERRNO(pthread_cond_wait(&st->wait_for_change, &st->mutex));
+        fprintf(stderr, "wake for change inactive\n");
+    }
+
     if (st->count > 0) {
         uint64_t now = time(NULL);
         uint64_t prev_count = st->count;
         for (size_t i = 0; i < prev_count; i++)
-            if (now - st->data[i]->last_heard >= inactivity_sec) {
+            if (now - st->data[i]->last_heard >=
+                inactivity_sec) {
                 if (st->data[i] == st->current)
                     st->current = NULL;
                 free(st->data[i]);
@@ -232,19 +250,6 @@ void delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
                 st->count--;
             }
 
-        _sort_stations(st);
-    }
-    CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
-}
-
-void remove_current_for_inactivity(stations *st) {
-    if (!st) fatal("null argument");
-    CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
-    if (!st->change_pending && st->count > 0) {
-        free(st->current);
-        st->current = NULL;
-        st->data[st->current_pos] = NULL;
-        st->count--;
         _sort_stations(st);
     }
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));

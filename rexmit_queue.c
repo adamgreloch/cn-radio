@@ -1,5 +1,6 @@
 #include "rexmit_queue.h"
 #include <pthread.h>
+#include <unistd.h>
 
 // TODO rewrite
 //  - queue of raw bytes
@@ -8,6 +9,7 @@
 struct addr_list {
     struct sockaddr_and_len addr;
     uint64_t first_byte_num;
+    int rexmit_session;
 
     struct addr_list *next;
 };
@@ -27,16 +29,18 @@ struct rexmit_queue {
     uint64_t count;
     uint64_t fsize;
     uint64_t psize;
-    uint64_t queue_size;
 
     addr_list *list_tail;
     addr_list *list_head;
 
     uint64_t list_len;
-
-    byte *pack_buf;
+    int curr_rexmit_session;
+    bool session_finished;
 
     pthread_mutex_t mutex;
+
+    bool during_rexmit;
+    pthread_cond_t rexmit_end_wait;
 };
 
 typedef struct rexmit_queue rexmit_queue;
@@ -45,7 +49,6 @@ rexmit_queue *rq_init(uint64_t psize, uint64_t fsize) {
     rexmit_queue *rq = malloc(sizeof(rexmit_queue));
     if (!rq)
         fatal("malloc");
-    rq->queue_size = fsize / psize;
 
     rq->queue = malloc(fsize);
     rq->queue_end = rq->queue + fsize;
@@ -56,19 +59,27 @@ rexmit_queue *rq_init(uint64_t psize, uint64_t fsize) {
     rq->count = 0;
     rq->psize = psize;
     rq->fsize = fsize;
+    rq->curr_rexmit_session = 0;
+    rq->session_finished = true;
+    rq->during_rexmit = false;
 
     rq->list_head = rq->list_tail = NULL;
     rq->list_len = 0;
 
-    rq->pack_buf = malloc(psize);
-
     CHECK_ERRNO(pthread_mutex_init(&rq->mutex, NULL));
+    CHECK_ERRNO(pthread_cond_init(&rq->rexmit_end_wait, NULL));
     return rq;
 }
 
 void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack) {
     if (!rq || !pack) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
+
+    while (rq->during_rexmit) {
+        fprintf(stderr, "i sleep\n");
+        CHECK_ERRNO(pthread_cond_wait(&rq->rexmit_end_wait, &rq->mutex));
+        fprintf(stderr, "real shit\n");
+    }
 
     if (rq->head == rq->tail && rq->count > 0) {
         // delete tail elem
@@ -81,12 +92,15 @@ void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack) {
 
     memcpy(rq->head, pack->audio_data, rq->psize);
 
-    rq->head_byte_num = pack->first_byte_num;
+    rq->head_byte_num = ntohll(pack->first_byte_num);
     rq->count++;
     rq->head += rq->psize;
 
     if (rq->head + rq->psize >= rq->queue_end)
         rq->head = rq->queue;
+
+//    fprintf(stderr, "added pack %lu (%lu, %lu)\n", rq->head_byte_num,
+//            rq->count, rq->list_len);
 
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
 }
@@ -104,13 +118,21 @@ byte *_find_pack(rexmit_queue *rq, uint64_t first_byte_num) {
 void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num,
                         struct sockaddr_and_len *receiver_addr) {
     if (first_byte_num < rq->tail_byte_num ||
-        first_byte_num > rq->head_byte_num)
+        first_byte_num > rq->head_byte_num) {
+        fprintf(stderr, "too late (%lu, %lu, %lu)\n", rq->tail_byte_num,
+                first_byte_num, rq->head_byte_num);
         return; // request invalid, ignore
+    }
 
     addr_list *al = malloc(sizeof(addr_list));
     al->addr = *receiver_addr;
     al->next = NULL;
     al->first_byte_num = first_byte_num;
+
+    al->rexmit_session = rq->curr_rexmit_session;
+
+    if (rq->during_rexmit)
+        al->rexmit_session = 1 - al->rexmit_session;
 
     if (!rq->list_tail)
         rq->list_tail = al;
@@ -120,6 +142,9 @@ void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num,
 
     rq->list_head = al;
     rq->list_len++;
+
+//    fprintf(stderr, "bound addr to %lu (%lu, %lu)\n", first_byte_num,
+//            rq->count, rq->list_len);
 }
 
 void rq_bind_addr(rexmit_queue *rq, uint64_t *packs, uint64_t n_packs, struct
@@ -155,29 +180,45 @@ bool rq_pop_pack_for_addr(rexmit_queue *rq, byte *pack_data,
                             uint64_t *first_byte_num,
                             struct sockaddr_and_len *receiver_addr) {
     if (!rq) fatal("null argument");
-    uint64_t count;
 
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
-    if (rq->count == 0 || rq->list_len == 0) {
+    if (rq->count == 0 || rq->list_len == 0 || rq->session_finished) {
+        if (rq->session_finished)
+            rq->session_finished = false;
         CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
         return false;
     }
 
-    addr_list *al;
+    if (!rq->during_rexmit)
+        rq->during_rexmit = true;
+
+    addr_list *al = NULL;
     bool pack_ready = false;
 
     while (!pack_ready && rq->list_len > 0) {
         al = _pop_from_list(rq);
-        if (rq->tail_byte_num <= al->first_byte_num
+        if (al && rq->tail_byte_num <= al->first_byte_num
             && al->first_byte_num <= rq->head_byte_num) {
             memcpy(pack_data, _find_pack(rq, al->first_byte_num),
                    rq->psize);
             *first_byte_num = al->first_byte_num;
             pack_ready = true;
+//            fprintf(stderr, "popped pack (%lu, %lu, sess=%d)\n", rq->count,
+//                    rq->list_len, rq->curr_rexmit_session);
+        }
+        if (rq->list_len == 0 ||
+            al->rexmit_session != rq->curr_rexmit_session) {
+            rq->session_finished = true;
+            rq->during_rexmit = false;
+            rq->curr_rexmit_session = 1 - rq->curr_rexmit_session;
+            fprintf(stderr, "session end\n");
+            CHECK_ERRNO(pthread_cond_signal(&rq->rexmit_end_wait));
+            break;
         }
     }
 
-    *receiver_addr = al->addr;
+    if (al)
+        *receiver_addr = al->addr;
 
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
 

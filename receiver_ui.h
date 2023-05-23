@@ -35,9 +35,7 @@ void select_station_up(stations *st);
 
 void select_station_down(stations *st);
 
-bool switch_if_changed(stations *st, station **new_station);
-
-void remove_current_for_inactivity(stations *st);
+bool switch_if_changed(stations *st, station *new_station);
 
 void wait_until_any_station_found(stations *st);
 

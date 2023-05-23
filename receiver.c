@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <poll.h>
 #include "common.h"
 #include "err.h"
 #include "pack_buffer.h"
@@ -28,16 +27,18 @@ void *pack_receiver(void *args) {
 
     struct sockaddr_in station_addr;
 
-    // TODO rewrite to wait for station with given name
-    wait_until_any_station_found(rd->st);
+    station curr_station;
+
 
     while (true) {
-        if (switch_if_changed(rd->st, &rd->curr_station)) {
+        // TODO rewrite to wait for station with given name
+        if (switch_if_changed(rd->st, &curr_station)) {
             if (socket_fd > 0)
+                // TODO make sockets reusable
                 CHECK_ERRNO(close(socket_fd));
 
-            inet_aton(rd->curr_station->mcast_addr, &station_addr.sin_addr);
-            socket_fd = create_recv_socket(rd->curr_station->port,
+            inet_aton(curr_station.mcast_addr, &station_addr.sin_addr);
+            socket_fd = create_recv_socket(curr_station.port,
                                            &station_addr);
             rd->last_session_id = 0;
         }
@@ -62,7 +63,7 @@ void *pack_printer(void *args) {
     while (true) {
         memset(write_buffer, 0, rd->bsize);
         psize = pb_pop_front(rd->pb, write_buffer);
-        fwrite(write_buffer, psize, sizeof(byte), stdout);
+//        fwrite(write_buffer, psize, sizeof(byte), stdout);
     }
 }
 
@@ -91,7 +92,6 @@ void *missing_reporter(void *args) {
     wait_until_any_station_found(rd->st);
 
     while (true) {
-        usleep(rd->rtime_u);
         pb_find_missing(rd->pb, &n_packs_total, &missing_buf,
                         &buf_size);
 
@@ -105,6 +105,7 @@ void *missing_reporter(void *args) {
                                           n_packs_to_send);
                 n_packs_sent += n_packs_to_send;
 
+                CHECK_ERRNO(pthread_mutex_lock(&rd->mutex));
                 rd->client_address.sin_port = htons(rd->ctrl_port);
 
                 sent_size = sendto(send_sock_fd, write_buffer, wrote_size,
@@ -112,8 +113,10 @@ void *missing_reporter(void *args) {
                                            &rd->client_address,
                                    rd->client_address_len);
                 ENSURE(sent_size == wrote_size);
+                CHECK_ERRNO(pthread_mutex_unlock(&rd->mutex));
             }
         n_packs_sent = 0;
+        usleep(rd->rtime_u);
     }
 }
 

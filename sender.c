@@ -137,7 +137,6 @@ void *pack_retransmitter() {
     bind_socket(send_sock_fd, 0); // bind to any port
 
     byte* audio_data = malloc(psize);
-    uint64_t list_len = 0;
     uint64_t first_byte_num;
 
     struct audio_pack pack;
@@ -146,8 +145,7 @@ void *pack_retransmitter() {
 
     while (!finished) {
         usleep(rtime_u);
-        fprintf(stderr, "RTIME\n");
-        if (rq_pop_pack_for_addr(rq, audio_data, &first_byte_num,
+        while (rq_pop_pack_for_addr(rq, audio_data, &first_byte_num,
                                  &receiver_addr)) {
             pack.first_byte_num = first_byte_num;
             pack.session_id = session_id;

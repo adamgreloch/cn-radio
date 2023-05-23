@@ -112,7 +112,7 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
 
     opterr = 0;
 
-    while ((c = getopt(argc, argv, "a:n:p:P:C:R:F:")) != -1) {
+    while ((c = getopt(argc, argv, "a:n:p:P:C:R:f:")) != -1) {
         switch (c) {
             case 'a':
                 aflag = 1;
@@ -151,8 +151,8 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
                     errflag = 1;
                 }
                 break;
-            case 'F':
-                opts->psize = strtoull(optarg, NULL, 10);
+            case 'f':
+                opts->fsize = strtoull(optarg, NULL, 10);
                 if (opts->fsize == 0) {
                     fprintf(stderr, "Invalid FIFO size: %s\n", optarg);
                     errflag = 1;
