@@ -11,6 +11,17 @@ char line_break[] = "-----------------------------------------------------------
 #define INIT_SIZE 16
 #define INIT_UI_BUF_SIZE 4096
 
+#define INIT_PD_SIZE 16
+#define QUEUE_LENGTH 8
+#define TIMEOUT (-1)
+
+// TODO set reasonable buf sizes
+#define UI_BUF_SIZE 512
+#define NAV_BUF_SIZE 128
+
+#define INACTIVITY_THRESH 20
+#define DISCOVER_SLEEP 5
+
 struct stations {
     station **data;
     uint64_t count;
@@ -19,6 +30,8 @@ struct stations {
     bool change_pending;
     station *current;
     uint64_t current_pos;
+
+    char prioritized[MAX_NAME_LEN + 1];
 
     char *ui_buffer;
     uint64_t ui_buffer_size;
@@ -37,6 +50,8 @@ stations *init_stations() {
     st->current = NULL;
     st->current_pos = 0;
     st->change_pending = false;
+
+    st->prioritized[0] = '\0';
 
     st->ui_buffer = calloc(INIT_UI_BUF_SIZE, sizeof(char));
     st->ui_buffer_size = INIT_UI_BUF_SIZE;
@@ -86,7 +101,7 @@ void _sort_stations(stations *st) {
 }
 
 void
-update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
+st_update(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
     if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
 
@@ -102,15 +117,15 @@ update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
         st->size *= 2;
     }
 
-    size_t empty = st->size + 1;
+    size_t empty = st->size;
     bool found = false;
 
     for (size_t i = 0; i < st->size && !found; i++) {
         if (st->data[i] == NULL) {
-            if (empty == st->size + 1)
+            if (empty == st->size)
                 empty = i;
         }
-            // do the equality comparisons from cheapest to most expensive
+        // do the equality comparisons from cheapest to the most expensive
         else if (st->data[i]->port == port &&
                  _str_compare(mcast_addr_str, st->data[i]->mcast_addr) == 0
                  && _str_compare(name, st->data[i]->name) == 0) {
@@ -120,7 +135,7 @@ update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
         }
     }
 
-    if (!found) {
+    if (!found && empty < st->size) {
         st->data[empty] = malloc(sizeof(station));
         if (!st->data[empty])
             fatal("malloc");
@@ -131,17 +146,18 @@ update_station(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
         curr->last_heard = time(NULL);
         memcpy(curr->name, name, strlen(name));
         st->count++;
+
+        if (!st->current && (st->prioritized[0] == '\0' ||
+                             _str_compare(st->prioritized, name) == 0)) {
+            st->current = curr;
+            st->current_pos = empty;
+            st->change_pending = true;
+            fprintf(stderr, "set current to %s\n", st->current->mcast_addr);
+            CHECK_ERRNO(pthread_cond_broadcast(&st->wait_for_found));
+        }
     }
 
     _sort_stations(st);
-
-    if (!st->current) {
-        st->current = st->data[0];
-        st->current_pos = 0;
-        st->change_pending = true;
-        fprintf(stderr, "set current to %s\n", st->current->mcast_addr);
-        CHECK_ERRNO(pthread_cond_broadcast(&st->wait_for_found));
-    }
 
     fprintf(stderr, "station %s updated\n", mcast_addr_str);
 
@@ -159,7 +175,7 @@ void _move_selection(stations *st, int delta) {
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
 
-void print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
+void st_print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
     if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     size_t wrote = 0;
@@ -199,15 +215,21 @@ void print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
 
-void select_station_up(stations *st) {
+void st_prioritize_name(stations *st, char* station_name) {
+    CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
+    memcpy(st->prioritized, station_name, strlen(station_name));
+    CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
+}
+
+void st_select_station_up(stations *st) {
     _move_selection(st, -1);
 }
 
-void select_station_down(stations *st) {
+void st_select_station_down(stations *st) {
     _move_selection(st, 1);
 }
 
-bool switch_if_changed(stations *st, station *new_station) {
+bool st_switch_if_changed(stations *st, station *new_station) {
     if (!st) fatal("null argument");
     bool res = false;
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
@@ -228,7 +250,7 @@ bool switch_if_changed(stations *st, station *new_station) {
     return res;
 }
 
-void delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
+void st_delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
     if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     while (st->change_pending) {
@@ -255,7 +277,7 @@ void delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
 
-void wait_until_any_station_found(stations *st) {
+void st_wait_until_station_found(stations *st) {
     if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     while (!st->current)
@@ -353,7 +375,8 @@ void *ui_manager(void *args) {
                         negotiated[i] = true;
                     } else {
                         size_t ui_len;
-                        print_ui(&ui_buffer, &ui_buffer_size, &ui_len, rd->st);
+                        st_print_ui(&ui_buffer, &ui_buffer_size, &ui_len,
+                                    rd->st);
                         sent = write(pd[i].fd, ui_buffer, ui_len);
                         ENSURE(sent == (ssize_t) ui_len);
                     }
@@ -386,7 +409,9 @@ void *station_discoverer(void *args) {
 
     char mcast_addr_str[20];
     uint16_t sender_port;
-    char sender_name[64 + 1];
+    char sender_name[MAX_NAME_LEN + 1];
+
+    st_prioritize_name(rd->st, rd->prioritized_name);
 
     while (true) {
         memset(write_buffer, 0, CTRL_BUF_SIZE);
@@ -409,8 +434,8 @@ void *station_discoverer(void *args) {
                 parse_reply(write_buffer, recv_size, mcast_addr_str,
                             &sender_port,
                             sender_name);
-                update_station(rd->st, mcast_addr_str, sender_port,
-                               sender_name);
+                st_update(rd->st, mcast_addr_str, sender_port,
+                          sender_name);
             }
 
             memset(mcast_addr_str, 0, sizeof(mcast_addr_str));
@@ -418,7 +443,7 @@ void *station_discoverer(void *args) {
             memset(write_buffer, 0, CTRL_BUF_SIZE);
         }
 
-        delete_inactive_stations(rd->st, INACTIVITY_THRESH);
+        st_delete_inactive_stations(rd->st, INACTIVITY_THRESH);
     }
 }
 

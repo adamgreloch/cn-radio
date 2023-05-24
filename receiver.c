@@ -32,7 +32,7 @@ void *pack_receiver(void *args) {
 
     while (true) {
         // TODO rewrite to wait for station with given name
-        if (switch_if_changed(rd->st, &curr_station)) {
+        if (st_switch_if_changed(rd->st, &curr_station)) {
             if (socket_fd > 0)
                 // TODO make sockets reusable
                 CHECK_ERRNO(close(socket_fd));
@@ -63,7 +63,7 @@ void *pack_printer(void *args) {
     while (true) {
         memset(write_buffer, 0, rd->bsize);
         psize = pb_pop_front(rd->pb, write_buffer);
-//        fwrite(write_buffer, psize, sizeof(byte), stdout);
+        fwrite(write_buffer, psize, sizeof(byte), stdout);
     }
 }
 
@@ -89,7 +89,7 @@ void *missing_reporter(void *args) {
     uint64_t *missing_buf = NULL;
     uint64_t buf_size = 0;
 
-    wait_until_any_station_found(rd->st);
+    st_wait_until_station_found(rd->st);
 
     while (true) {
         pb_find_missing(rd->pb, &n_packs_total, &missing_buf,
@@ -112,8 +112,8 @@ void *missing_reporter(void *args) {
                                    flags, (struct sockaddr *)
                                            &rd->client_address,
                                    rd->client_address_len);
-                ENSURE(sent_size == wrote_size);
                 CHECK_ERRNO(pthread_mutex_unlock(&rd->mutex));
+                ENSURE(sent_size == wrote_size);
             }
         n_packs_sent = 0;
         usleep(rd->rtime_u);

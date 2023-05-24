@@ -123,7 +123,7 @@ void wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
     if (ptr + bytes > pb->buf_end)
         bytes -= ptr + bytes - pb->buf_end;
 
-    memset(ptr, 0, bytes % (pb->buf_end - ptr));
+    memset(ptr, 0, bytes);
     uint64_t pos = ptr - pb->buf;
     assert(pos % pb->psize == 0);
     memset(pb->is_present + pos, 0, bytes);
@@ -239,25 +239,23 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 }
 
-void take_pack_if_present_else_reset(pack_buffer *pb, void *item) {
+void take_pack_if_present(pack_buffer *pb, void *item) {
     if (pb->is_present[pb->tail - pb->buf]) {
         memcpy(item, pb->tail, pb->psize);
         pb->is_present[pb->tail - pb->buf] = false;
+    } // else: just play silence
+    /*
+     * NOTE: just playing silence does not comply with the requirements, which
+     * say that if the pack is not found, the playback should be stopped
+     * just like it is done in case of buffer depletion. However,
+     * following this requirement degrades the playback fluency if the
+     * REXMIT parameters are picked suboptimally. It is thus reasonable to
+     * ignore this requirement for the sake of better listening experience.
+     */
 
-        if (pb->head != pb->tail) {
-            pb->tail += pb->psize;
-            handle_buf_end_overlap(&pb->tail, pb);
-        }
-    }
-    else {
-        // If nothing was present under the tail, wait in hope
-        // that missing packs will be soon retransmitted.
-        pb->byte_zero = pb->head_byte_num;
-        while (pb->head_byte_num - pb->byte_zero < pb->capacity / 4 * 3) {
-            fprintf(stderr, "pb wait\n");
-            CHECK_ERRNO(pthread_cond_wait(&pb->byte_zero_wait, &pb->mutex));
-            fprintf(stderr, "pb no wait\n");
-        }
+    if (pb->head != pb->tail) {
+        pb->tail += pb->psize;
+        handle_buf_end_overlap(&pb->tail, pb);
     }
 }
 
@@ -275,7 +273,7 @@ uint64_t pb_pop_front(pack_buffer *pb, void *item) {
         CHECK_ERRNO(pthread_cond_wait(&pb->byte_zero_wait, &pb->mutex));
     }
 
-    take_pack_if_present_else_reset(pb, item);
+    take_pack_if_present(pb, item);
 
     uint64_t curr_psize = pb->psize;
 

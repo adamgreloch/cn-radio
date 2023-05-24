@@ -17,31 +17,31 @@ int main() {
     station *new;
 
     for (int i = 0; i < 3; i++) {
-        update_station(st, mcast_addr_strs[i], ports[i], names[i]);
+        st_update(st, mcast_addr_strs[i], ports[i], names[i]);
 
-        switch_if_changed(st, &new);
+        st_switch_if_changed(st, &new);
 
-        print_ui(&buf, &buf_size, &ui_size, st);
+        st_print_ui(&buf, &buf_size, &ui_size, st);
 
         printf("%s", buf);
     }
     for (int i = 0; i < 3; i++) {
-        update_station(st, mcast_addr_strs[i], ports[i], names[i]);
+        st_update(st, mcast_addr_strs[i], ports[i], names[i]);
 
-        switch_if_changed(st, &new);
+        st_switch_if_changed(st, &new);
 
-        print_ui(&buf, &buf_size, &ui_size, st);
+        st_print_ui(&buf, &buf_size, &ui_size, st);
 
         printf("%s", buf);
     }
 
 
     for (int i = 0; i < 3; i++) {
-        select_station_down(st);
+        st_select_station_down(st);
 
-        print_ui(&buf, &buf_size, &ui_size, st);
+        st_print_ui(&buf, &buf_size, &ui_size, st);
 
-        switch_if_changed(st, &new);
+        st_switch_if_changed(st, &new);
 
         printf("%s", buf);
     }

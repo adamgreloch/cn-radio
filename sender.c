@@ -117,7 +117,7 @@ void *ctrl_listener() {
             case REXMIT:
                 memset(packs, 0, CTRL_BUF_SIZE);
                 parse_rexmit(buffer, packs, &n_packs);
-                fprintf(stderr, "got rexmit!\n");
+//                fprintf(stderr, "got rexmit!\n");
 
                 receiver_sal.addr = receiver_addr;
                 receiver_sal.addr_len = address_length;
@@ -151,7 +151,7 @@ void *pack_retransmitter() {
             pack.session_id = session_id;
             pack.audio_data = audio_data;
             send_pack(send_sock_fd, &receiver_addr.addr, &pack, psize);
-            fprintf(stderr, "retransmitted %lu\n", first_byte_num);
+//            fprintf(stderr, "retransmitted %lu\n", first_byte_num);
         }
     }
     return 0;

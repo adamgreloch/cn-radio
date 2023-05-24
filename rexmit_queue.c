@@ -119,8 +119,8 @@ void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num,
                         struct sockaddr_and_len *receiver_addr) {
     if (first_byte_num < rq->tail_byte_num ||
         first_byte_num > rq->head_byte_num) {
-        fprintf(stderr, "too late (%lu, %lu, %lu)\n", rq->tail_byte_num,
-                first_byte_num, rq->head_byte_num);
+//        fprintf(stderr, "too late (%lu, %lu, %lu)\n", rq->tail_byte_num,
+//                first_byte_num, rq->head_byte_num);
         return; // request invalid, ignore
     }
 
@@ -211,7 +211,7 @@ bool rq_pop_pack_for_addr(rexmit_queue *rq, byte *pack_data,
             rq->session_finished = true;
             rq->during_rexmit = false;
             rq->curr_rexmit_session = 1 - rq->curr_rexmit_session;
-            fprintf(stderr, "session end\n");
+//            fprintf(stderr, "session end\n");
             CHECK_ERRNO(pthread_cond_signal(&rq->rexmit_end_wait));
             break;
         }

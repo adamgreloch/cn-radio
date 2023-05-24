@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include "receiver_config.h"
 
 #define NUM 438473
 #define DEFAULT_PSIZE 512
@@ -18,7 +19,6 @@
 #define DEFAULT_FSIZE 131072
 #define DEFAULT_RTIME 250
 #define DEFAULT_NAME "Nienazwany Nadajnik"
-#define MAX_NAME_LEN 64
 
 struct sender_opts {
     /** address of targeted receiver (set with option -a, obligatory) */
@@ -44,25 +44,12 @@ struct sender_opts {
     uint64_t rtime;
 
     /** sender name (set with -n) defaults to @p DEFAULT_NAME */
-    char sender_name[64 + 1];
+    char sender_name[MAX_NAME_LEN + 1];
 };
 
 typedef struct sender_opts sender_opts;
 
 struct receiver_opts {
-    /** address of multicast
-     * set with option -a, obligatory
-     * FIXME this is only for debugging purposes, until the discovery/TCP
-     *  selector is implemented
-     */
-    char mcast_addr[20];
-
-    /** data port
-     * set with option -P, defaults to @p DATA_PORT
-     */
-    char portstr[12];
-    uint16_t port;
-
     /** address used for control protocol with senders
      * set with option -d, defaults to @p DISCOVER_ADDR
      */
@@ -86,13 +73,17 @@ struct receiver_opts {
 
     /** buffer size (set with -b) defaults to @p DEFAULT_BSIZE */
     uint64_t bsize;
+
+    /** prioritized sender name (set with -n) defaults to '\0' (none) */
+    char sender_name[MAX_NAME_LEN + 1];
 };
 
 typedef struct receiver_opts receiver_opts;
 
 // TODO handle all incorrect args
-// TODO add ANSI check for name
+// TODO add ANSI check for name, check for non-emptiness
 // TODO add -n argument for receiver
+// TODO refactor
 
 inline static sender_opts *get_sender_opts(int argc, char **argv) {
     sender_opts *opts = malloc(sizeof(sender_opts));
@@ -203,22 +194,23 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
     receiver_opts *opts = malloc(sizeof(receiver_opts));
 
     opts->bsize = DEFAULT_BSIZE;
-    sprintf(opts->portstr, "%d", DATA_PORT);
     opts->ctrl_port = CTRL_PORT;
     sprintf(opts->ctrl_portstr, "%d", CTRL_PORT);
     opts->rtime = DEFAULT_RTIME;
     sprintf(opts->discover_addr, "%s", DISCOVER_ADDR);
     opts->ui_port = UI_PORT;
+    opts->sender_name[0] = '\0';
 
     int errflag = 0;
 
     int c;
+    int len;
 
     opterr = 0;
 
     size_t port;
 
-    while ((c = getopt(argc, argv, "b:P:d:C:R:U:")) != -1) {
+    while ((c = getopt(argc, argv, "n:b:d:C:R:U:")) != -1) {
         switch (c) {
             case 'd':
                 memset(opts->discover_addr, 0, sizeof(opts->discover_addr));
@@ -258,20 +250,19 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                     errflag = 1;
                 }
                 break;
-            case 'P':
-                memset(opts->portstr, 0, sizeof(opts->portstr));
-                memcpy(opts->portstr, optarg, strlen(optarg));
-                port = strtoull(optarg, NULL, 10);
-                if (port < (1 << 10) || port > (1 << 16)) {
-                    fprintf(stderr,
-                            "Invalid or illegal port number: %s\n",
-                            optarg);
+            case 'n':
+                len = strlen(optarg);
+                if (len > MAX_NAME_LEN) {
+                    fprintf(stderr, "Name too long: %s\n", optarg);
                     errflag = 1;
-                } else opts->port = port;
+                } else {
+                    memset(opts->sender_name, 0, sizeof(opts->sender_name));
+                    memcpy(opts->sender_name, optarg, strlen(optarg));
+                }
                 break;
             case '?':
-                if (optopt == 'b' || optopt == 'P'
-                    || optopt == 'd' || optopt == 'C' || optopt == 'R'
+                if (optopt == 'b' || optopt == 'd' || optopt == 'C' ||
+                    optopt == 'R'
                     || optopt == 'U')
                     fprintf(stderr, "Option -%c requires an argument.\n",
                             optopt);

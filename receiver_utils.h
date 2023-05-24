@@ -7,17 +7,7 @@
 #include "pack_buffer.h"
 #include "receiver_ui.h"
 #include "opts.h"
-
-#define INACTIVITY_THRESH 20
-#define DISCOVER_SLEEP 5
-
-#define INIT_PD_SIZE 16
-#define QUEUE_LENGTH 8
-#define TIMEOUT (-1)
-
-// TODO set reasonable buf sizes
-#define UI_BUF_SIZE 512
-#define NAV_BUF_SIZE 128
+#include "receiver_utils.h"
 
 struct receiver_data {
     uint64_t curr_session_id;
@@ -29,6 +19,8 @@ struct receiver_data {
     uint64_t bsize;
     uint64_t rtime_u;
     struct sockaddr_in discover_addr;
+
+    char* prioritized_name;
 
     stations *st;
 
@@ -53,6 +45,8 @@ inline static receiver_data *rd_init(int argc, char **argv) {
     rd->pb = pb_init(rd->bsize);
     rd->st = init_stations();
 
+    rd->prioritized_name = opts->sender_name;
+
     rd->client_address_len = (socklen_t) sizeof(rd->client_address);
     rd->last_session_id = 0;
 
@@ -75,10 +69,10 @@ inline static void handle_input(char *nav_buffer, stations *st) {
     if (nav_buffer[0] == '\033' && nav_buffer[1] == '\133')
         switch (nav_buffer[2]) {
             case 'A': // Received arrow up
-                select_station_up(st);
+                st_select_station_up(st);
                 break;
             case 'B': // Received arrow down
-                select_station_down(st);
+                st_select_station_down(st);
                 break;
         }
 }
@@ -88,7 +82,7 @@ inline static int create_recv_socket(uint16_t port, struct sockaddr_in
     int socket_fd = create_socket(port);
 
     struct timeval tv;
-    tv.tv_sec = INACTIVITY_THRESH;
+    tv.tv_sec = 1;
     tv.tv_usec = 0;
     CHECK_ERRNO(setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof
             (tv)));
@@ -114,10 +108,6 @@ inline static size_t receive_pack(int socket_fd, struct audio_pack **pack, byte
 
     if (read_length < 0)
         return 0;
-//    {
-//        remove_current_for_inactivity(rd->st);
-//        return 0;
-//    }
 
     *psize = read_length - 16;
 
@@ -128,8 +118,7 @@ inline static size_t receive_pack(int socket_fd, struct audio_pack **pack, byte
     rd->curr_session_id = ntohll((*pack)->session_id);
 
     if (rd->curr_session_id > rd->last_session_id)
-        pb_reset(rd->pb, *psize, ntohll((*pack)
-                                                ->first_byte_num));
+        pb_reset(rd->pb, *psize, ntohll((*pack)->first_byte_num));
 
     if (rd->curr_session_id < rd->last_session_id)
         return 0;
