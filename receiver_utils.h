@@ -1,7 +1,9 @@
 #ifndef _RECEIVER_UTILS_
 #define _RECEIVER_UTILS_
 
+#include <stdint.h>
 #include <unistd.h>
+#include <netinet/in.h>
 #include "err.h"
 #include "common.h"
 #include "pack_buffer.h"
