@@ -10,7 +10,7 @@ int main() {
 
     for (int i = 0; i < 25; i++) {
         pack.first_byte_num = psize * i;
-        sprintf((char*) data, "%d", psize * i);
+        sprintf((char *) data, "%d", psize * i);
         pack.audio_data = data;
         rq_add_pack(rq, &pack);
     }
@@ -38,7 +38,7 @@ int main() {
     rq_bind_addr(rq, packs, n_packs, &receiver_addr); // should bind and extend
     // lists
 
-    sockaddr_and_len* receiver_addrs = NULL;
+    sockaddr_and_len *receiver_addrs = NULL;
     uint64_t addr_count = 0;
 
     uint64_t head_bn, tail_bn;
@@ -47,14 +47,14 @@ int main() {
 
     struct audio_pack res;
 
-    byte* audio_data = malloc(psize);
+    byte *audio_data = malloc(psize);
     uint64_t list_len = 0;
     uint64_t first_byte_num;
 
     uint64_t session_id = 0;
 
     while (rq_pop_pack_for_addr(rq, audio_data, &first_byte_num,
-                             &receiver_addr)) {
+                                &receiver_addr)) {
         pack.first_byte_num = first_byte_num;
         pack.session_id = session_id;
         pack.audio_data = audio_data;
@@ -63,7 +63,7 @@ int main() {
 
     for (int i = 25; i < 50; i++) {
         pack.first_byte_num = psize * i;
-        sprintf((char*) data, "%d", psize * i);
+        sprintf((char *) data, "%d", psize * i);
         pack.audio_data = data;
         rq_add_pack(rq, &pack);
     }

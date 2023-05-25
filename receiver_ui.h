@@ -30,7 +30,8 @@ void st_delete_inactive_stations(stations *st, uint64_t inactivity_sec);
  * @param ui_size
  * @param st
  */
-void st_print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st);
+void
+st_print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st);
 
 void st_select_station_up(stations *st);
 
@@ -40,7 +41,7 @@ bool st_switch_if_changed(stations *st, station *new_station);
 
 void st_wait_until_station_found(stations *st);
 
-void st_prioritize_name(stations *st, char* station_name);
+void st_prioritize_name(stations *st, char *station_name);
 
 void *ui_manager(void *args);
 

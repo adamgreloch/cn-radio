@@ -124,7 +124,7 @@ st_update(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
             if (empty == st->size)
                 empty = i;
         }
-        // do the equality comparisons from cheapest to the most expensive
+            // do the equality comparisons from cheapest to the most expensive
         else if (st->data[i]->port == port &&
                  _str_compare(mcast_addr_str, st->data[i]->mcast_addr) == 0
                  && _str_compare(name, st->data[i]->name) == 0) {
@@ -174,7 +174,8 @@ void _move_selection(stations *st, int delta) {
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
 
-void st_print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
+void
+st_print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
     if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     size_t wrote = 0;
@@ -214,7 +215,7 @@ void st_print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
 
-void st_prioritize_name(stations *st, char* station_name) {
+void st_prioritize_name(stations *st, char *station_name) {
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     memcpy(st->prioritized, station_name, strlen(station_name));
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));

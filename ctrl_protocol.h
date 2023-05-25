@@ -14,15 +14,15 @@
 
 int write_lookup(char *buf);
 
-int write_reply(char *buf, char* mcast_addr_str, uint16_t port,
-                         char* sender_name);
+int write_reply(char *buf, char *mcast_addr_str, uint16_t port,
+                char *sender_name);
 
 int write_rexmit(char *buf, uint64_t *packs, uint64_t n_packs);
 
 int what_message(char *buf);
 
-int parse_reply(char *msg, uint64_t msg_size, char* mcast_addr_str, uint16_t
-*port, char* sender_name);
+int parse_reply(char *msg, uint64_t msg_size, char *mcast_addr_str, uint16_t
+*port, char *sender_name);
 
 int parse_rexmit(char *msg, uint64_t *packs, uint64_t
 *n_packs);

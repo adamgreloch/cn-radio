@@ -18,10 +18,10 @@ int write_lookup(char *buf) {
     return sprintf(buf, "%s", LOOKUP_STR);
 }
 
-int write_reply(char *buf, char* mcast_addr_str, uint16_t port,
-                               char* sender_name) {
+int write_reply(char *buf, char *mcast_addr_str, uint16_t port,
+                char *sender_name) {
     return sprintf(buf, "%s %s %d %s", REPLY_STR, mcast_addr_str, port,
-               sender_name);
+                   sender_name);
 }
 
 int write_rexmit(char *buf, uint64_t *packs, uint64_t n_packs) {
@@ -42,12 +42,12 @@ int what_message(char *buf) {
     return -1;
 }
 
-int parse_reply(char *msg, uint64_t msg_size, char* mcast_addr_str, uint16_t
-    *port, char* sender_name) {
+int parse_reply(char *msg, uint64_t msg_size, char *mcast_addr_str, uint16_t
+*port, char *sender_name) {
     char *prev_token;
     char *token;
 
-    char* save_ptr;
+    char *save_ptr;
 
     strtok_r(msg, " ", &save_ptr); // skip message specifier
     prev_token = strtok_r(NULL, " ", &save_ptr); // find pointer to
@@ -70,7 +70,7 @@ int parse_reply(char *msg, uint64_t msg_size, char* mcast_addr_str, uint16_t
 int parse_rexmit(char *msg, uint64_t *packs, uint64_t
 *n_packs) {
     char *token;
-    char* save_ptr;
+    char *save_ptr;
 
     *n_packs = 0;
 

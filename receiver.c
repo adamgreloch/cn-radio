@@ -33,7 +33,6 @@ void *pack_receiver(void *args) {
     while (true) {
         if (st_switch_if_changed(rd->st, &curr_station)) {
             if (socket_fd > 0)
-                // TODO make sockets reusable
                 CHECK_ERRNO(close(socket_fd));
 
             inet_aton(curr_station.mcast_addr, &station_addr.sin_addr);

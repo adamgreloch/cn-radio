@@ -23,7 +23,7 @@ struct receiver_data {
     uint64_t rtime_u;
     struct sockaddr_in discover_addr;
 
-    char* prioritized_name;
+    char *prioritized_name;
 
     stations *st;
 

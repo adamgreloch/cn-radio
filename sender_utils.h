@@ -70,8 +70,8 @@ inline static size_t read_pack(FILE *stream, uint64_t pack_size, byte *data) {
 }
 
 inline static void send_pack(int socket_fd, const struct sockaddr_in
-        *dest_address,
-               const struct audio_pack *pack, sender_data *sd) {
+*dest_address,
+                             const struct audio_pack *pack, sender_data *sd) {
     socklen_t address_length = (socklen_t) sizeof(*dest_address);
     int flags = 0;
 
