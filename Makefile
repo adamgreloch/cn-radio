@@ -1,7 +1,7 @@
 TARGETS = sikradio-receiver sikradio-sender
 
 CC     = gcc
-CFLAGS = -Wall -Wextra -O2 -pthread -g
+CFLAGS = -g -Wall -Wextra -O2 -pthread
 
 all: $(TARGETS)
 

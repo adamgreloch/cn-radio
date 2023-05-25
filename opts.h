@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include "err.h"
 #include "receiver_config.h"
 
 #define NUM 438473
@@ -80,10 +81,76 @@ struct receiver_opts {
 
 typedef struct receiver_opts receiver_opts;
 
-// TODO handle all incorrect args
-// TODO add ANSI check for name, check for non-emptiness
-// TODO add -n argument for receiver
-// TODO refactor
+inline static int parse_string_from_opt(char *dest, size_t dest_size) {
+    if (strlen(optarg) > dest_size) {
+        fprintf(stderr,
+                "Invalid argument: -%c %s\n", optopt,
+                optarg);
+        return 1;
+    }
+    memset(dest, 0, dest_size);
+    memcpy(dest, optarg, strlen(optarg));
+    return 0;
+}
+
+inline static int check_opt_for_numeric() {
+    for (size_t i = 0; i < strlen(optarg); i++)
+        if (optarg[i] < '0' || '9' < optarg[i]) {
+            fprintf(stderr, "Argument must be numeric/positive: %s\n", optarg);
+            return 1;
+        }
+    return 0;
+}
+
+inline static int parse_name_from_opt(char *dest, size_t dest_size) {
+    if (parse_string_from_opt(dest, dest_size) == 1) return 1;
+
+    if (strlen(optarg) == 0) {
+        fprintf(stderr, "Name cannot be empty.\n");
+        return 1;
+    }
+
+    if (isblank(dest[0]) || isblank(dest[strlen(optarg) - 1])) {
+        fprintf(stderr,
+                "Name cannot start/end with spaces: %s\n", optarg);
+        return 1;
+    }
+
+    for (size_t i = 0; i < strlen(optarg); i++)
+        if (dest[i] < 32) {
+            fprintf(stderr,
+                    "Illegal character '%c' in name: %s\n", dest[i], optarg);
+            return 1;
+        }
+
+    return 0;
+}
+
+inline static int parse_nonzero_from_opt(uint64_t *dest) {
+    errno = 0;
+    if (check_opt_for_numeric() == 1) return 1;
+    uint64_t n = strtoull(optarg, NULL, 10);
+    if (n == 0 || errno != 0) {
+        fprintf(stderr,
+                "Invalid argument: %s\n", optarg);
+        return 1;
+    }
+    *dest = n;
+    return 0;
+}
+
+inline static int parse_port_from_opt(uint16_t *dest) {
+    errno = 0;
+    if (check_opt_for_numeric() == 1) return 1;
+    uint64_t n = strtoull(optarg, NULL, 10);
+    if (n == 0 || n > 65535 || errno != 0) {
+        fprintf(stderr,
+                "Invalid or illegal port number: %s\n", optarg);
+        return 1;
+    }
+    *dest = n;
+    return 0;
+}
 
 inline static sender_opts *get_sender_opts(int argc, char **argv) {
     sender_opts *opts = malloc(sizeof(sender_opts));
@@ -99,7 +166,6 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
     int errflag = 0;
 
     int c;
-    int len;
 
     opterr = 0;
 
@@ -107,55 +173,27 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
         switch (c) {
             case 'a':
                 aflag = 1;
-                memset(opts->mcast_addr_str, 0, sizeof(opts->mcast_addr_str));
-                memcpy(opts->mcast_addr_str, optarg, strlen(optarg));
+                errflag = parse_string_from_opt(opts->mcast_addr_str, sizeof
+                        (opts->mcast_addr_str));
                 break;
             case 'C':
-                if ((opts->ctrl_port = strtoul(optarg, NULL, 10)) < 1024) {
-                    fprintf(stderr,
-                            "Invalid or illegal control port number: %s\n",
-                            optarg);
-                    errflag = 1;
-                }
+                errflag = parse_port_from_opt(&opts->ctrl_port);
                 break;
             case 'R':
-                opts->rtime = strtoul(optarg, NULL, 10);
-                if (opts->rtime == 0) {
-                    fprintf(stderr, "Invalid rtime_u: %s\n", optarg);
-                    errflag = 1;
-                }
+                errflag = parse_nonzero_from_opt(&opts->rtime);
                 break;
             case 'n':
-                len = strlen(optarg);
-                if (len > MAX_NAME_LEN) {
-                    fprintf(stderr, "Name too long: %s\n", optarg);
-                    errflag = 1;
-                } else {
-                    memset(opts->sender_name, 0, sizeof(opts->sender_name));
-                    memcpy(opts->sender_name, optarg, strlen(optarg));
-                }
+                errflag = parse_name_from_opt(opts->sender_name,
+                                              MAX_NAME_LEN);
                 break;
             case 'p':
-                opts->psize = strtoull(optarg, NULL, 10);
-                if (opts->psize == 0) {
-                    fprintf(stderr, "Invalid audio_pack size: %s\n", optarg);
-                    errflag = 1;
-                }
+                errflag = parse_nonzero_from_opt(&opts->psize);
                 break;
             case 'f':
-                opts->fsize = strtoull(optarg, NULL, 10);
-                if (opts->fsize == 0) {
-                    fprintf(stderr, "Invalid FIFO size: %s\n", optarg);
-                    errflag = 1;
-                }
+                errflag = parse_nonzero_from_opt(&opts->fsize);
                 break;
             case 'P':
-                opts->port = strtoul(optarg, NULL, 10);
-                if (opts->port < 1024) {
-                    fprintf(stderr, "Invalid or illegal port number: %s\n",
-                            optarg);
-                    errflag = 1;
-                }
+                errflag = parse_port_from_opt(&opts->port);
                 break;
             case '?':
                 if (optopt == 'a' || optopt == 'p' ||
@@ -204,66 +242,36 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
     int errflag = 0;
 
     int c;
-    int len;
 
     opterr = 0;
-
-    size_t port;
 
     while ((c = getopt(argc, argv, "n:b:d:C:R:U:")) != -1) {
         switch (c) {
             case 'd':
-                memset(opts->discover_addr, 0, sizeof(opts->discover_addr));
-                memcpy(opts->discover_addr, optarg, strlen(optarg));
+                errflag = parse_string_from_opt(opts->discover_addr, sizeof
+                        (opts->discover_addr));
                 break;
             case 'C':
-                memset(opts->ctrl_portstr, 0, sizeof(opts->ctrl_portstr));
-                memcpy(opts->ctrl_portstr, optarg, strlen(optarg));
-                port = strtoull(optarg, NULL, 10);
-                if (port < (1 << 10) || port > (1 << 16)) {
-                    fprintf(stderr,
-                            "Invalid or illegal control port number: %s\n",
-                            optarg);
-                    errflag = 1;
-                } else opts->ctrl_port = port;
+                errflag = parse_string_from_opt(opts->ctrl_portstr, sizeof
+                        (opts->ctrl_portstr));
+                errflag |= parse_port_from_opt(&opts->ctrl_port);
                 break;
             case 'U':
-                port = strtoull(optarg, NULL, 10);
-                if (port < (1 << 10) || port > (1 << 16)) {
-                    fprintf(stderr,
-                            "Invalid or illegal UI port number: %s\n",
-                            optarg);
-                    errflag = 1;
-                } else opts->ui_port = port;
+                errflag = parse_port_from_opt(&opts->ui_port);
                 break;
             case 'R':
-                opts->rtime = strtoull(optarg, NULL, 10);
-                if (opts->rtime == 0) {
-                    fprintf(stderr, "Invalid rtime_u: %s\n", optarg);
-                    errflag = 1;
-                }
+                errflag = parse_nonzero_from_opt(&opts->rtime);
                 break;
             case 'b':
-                opts->bsize = strtoull(optarg, NULL, 10);
-                if (opts->bsize == 0) {
-                    fprintf(stderr, "Invalid buffer size: %s\n", optarg);
-                    errflag = 1;
-                }
+                errflag = parse_nonzero_from_opt(&opts->bsize);
                 break;
             case 'n':
-                len = strlen(optarg);
-                if (len > MAX_NAME_LEN) {
-                    fprintf(stderr, "Name too long: %s\n", optarg);
-                    errflag = 1;
-                } else {
-                    memset(opts->sender_name, 0, sizeof(opts->sender_name));
-                    memcpy(opts->sender_name, optarg, strlen(optarg));
-                }
+                errflag = parse_name_from_opt(opts->sender_name,
+                                              MAX_NAME_LEN);
                 break;
             case '?':
                 if (optopt == 'b' || optopt == 'd' || optopt == 'C' ||
-                    optopt == 'R'
-                    || optopt == 'U')
+                    optopt == 'R' || optopt == 'U' || optopt == 'n')
                     fprintf(stderr, "Option -%c requires an argument.\n",
                             optopt);
                 else if (isprint(optopt))

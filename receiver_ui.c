@@ -15,7 +15,6 @@ char line_break[] = "-----------------------------------------------------------
 #define QUEUE_LENGTH 8
 #define TIMEOUT (-1)
 
-// TODO set reasonable buf sizes
 #define UI_BUF_SIZE 512
 #define NAV_BUF_SIZE 128
 
@@ -322,8 +321,6 @@ void *ui_manager(void *args) {
         for (int i = 0; i < pd_size; i++) {
             pd[i].revents = 0;
         }
-
-        sleep(1);
         int poll_status = poll(pd, pd_size, TIMEOUT);
         if (poll_status == -1)
             PRINT_ERRNO();
@@ -383,6 +380,7 @@ void *ui_manager(void *args) {
                 }
             }
         }
+        sleep(1);
     }
 }
 

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <netinet/in.h>
 #include "err.h"
 #include "common.h"

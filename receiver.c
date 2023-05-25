@@ -31,7 +31,6 @@ void *pack_receiver(void *args) {
 
 
     while (true) {
-        // TODO rewrite to wait for station with given name
         if (st_switch_if_changed(rd->st, &curr_station)) {
             if (socket_fd > 0)
                 // TODO make sockets reusable

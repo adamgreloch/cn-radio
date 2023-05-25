@@ -1,6 +1,6 @@
-#include "rexmit_queue.h"
 #include <pthread.h>
 #include <unistd.h>
+#include "rexmit_queue.h"
 
 static bool debug = false;
 
