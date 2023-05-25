@@ -89,6 +89,8 @@ inline static int create_recv_socket(uint16_t port, struct sockaddr_in
     tv.tv_usec = 0;
     CHECK_ERRNO(setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof
             (tv)));
+    CHECK_ERRNO(setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &true, sizeof
+            (int)));
 
     enable_multicast(socket_fd, mcast_addr);
 
