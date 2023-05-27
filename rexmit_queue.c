@@ -87,7 +87,7 @@ void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack) {
 
     memcpy(rq->head, pack->audio_data, rq->psize);
 
-    rq->head_byte_num = ntohll(pack->first_byte_num);
+    rq->head_byte_num = be64toh(pack->first_byte_num);
     rq->count++;
     rq->head += rq->psize;
 
@@ -101,7 +101,7 @@ void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack) {
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
 }
 
-byte *_find_pack(rexmit_queue *rq, uint64_t first_byte_num) {
+static byte *_find_pack(rexmit_queue *rq, uint64_t first_byte_num) {
     uint64_t rel_pos = rq->head_byte_num - first_byte_num;
     byte *ptr = (rq->head - rq->psize) - rel_pos;
 
@@ -111,8 +111,8 @@ byte *_find_pack(rexmit_queue *rq, uint64_t first_byte_num) {
     return ptr;
 }
 
-void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num,
-                        struct sockaddr_and_len *receiver_addr) {
+static void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num,
+                               struct sockaddr_and_len *receiver_addr) {
     if (first_byte_num < rq->tail_byte_num ||
         first_byte_num > rq->head_byte_num) {
         if (debug)
@@ -164,7 +164,7 @@ void rq_get_head_tail_byte_nums(rexmit_queue *rq, uint64_t *head_byte_num,
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
 }
 
-addr_list *_pop_from_list(rexmit_queue *rq) {
+static addr_list *_pop_from_list(rexmit_queue *rq) {
     addr_list *popped = rq->list_tail;
     rq->list_tail = popped->next;
     rq->list_len--;

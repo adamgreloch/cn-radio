@@ -11,7 +11,7 @@
 #include "receiver_ui.h"
 #include "receiver_utils.h"
 
-void *pack_receiver(void *args) {
+static void *pack_receiver(void *args) {
     receiver_data *rd = args;
 
     uint64_t psize;
@@ -44,12 +44,12 @@ void *pack_receiver(void *args) {
         read_length = receive_pack(socket_fd, &pack, buffer, &psize, rd);
 
         if (read_length > 0)
-            pb_push_back(rd->pb, ntohll(pack->first_byte_num),
+            pb_push_back(rd->pb, be64toh(pack->first_byte_num),
                          pack->audio_data, psize);
     }
 }
 
-void *pack_printer(void *args) {
+static void *pack_printer(void *args) {
     receiver_data *rd = args;
 
     byte *write_buffer = malloc(rd->bsize);
@@ -65,7 +65,7 @@ void *pack_printer(void *args) {
     }
 }
 
-void *missing_reporter(void *args) {
+static void *missing_reporter(void *args) {
     receiver_data *rd = args;
 
     int send_sock_fd = open_socket();

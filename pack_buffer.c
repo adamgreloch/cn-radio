@@ -41,7 +41,7 @@ pack_buffer *pb_init(uint64_t bsize) {
     return pb;
 }
 
-void reset_buffer(pack_buffer *pb, uint64_t byte_zero) {
+static void _reset_buffer(pack_buffer *pb, uint64_t byte_zero) {
     memset(pb->buf, 0, pb->capacity);
     memset(pb->is_present, 0, pb->capacity);
 
@@ -53,13 +53,13 @@ void reset_buffer(pack_buffer *pb, uint64_t byte_zero) {
 void pb_reset(pack_buffer *pb, uint64_t psize, uint64_t byte_zero) {
     if (!pb) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
-    reset_buffer(pb, byte_zero);
+    _reset_buffer(pb, byte_zero);
     pb->psize = psize;
     CHECK_ERRNO(pthread_cond_signal(&pb->init_wait));
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 }
 
-void handle_buf_end_overlap(byte **pos, pack_buffer *pb) {
+inline static void _handle_buf_end_overlap(byte **pos, pack_buffer *pb) {
     if (*pos + pb->psize > pb->buf_end)
         *pos = pb->buf;
 }
@@ -104,7 +104,7 @@ void pb_find_missing(pack_buffer *pb, uint64_t *n_packs,
         pos += pb->psize;
 
         if (pb->head != pb->buf_end)
-            handle_buf_end_overlap(&pos, pb);
+            _handle_buf_end_overlap(&pos, pb);
     }
 
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
@@ -119,7 +119,7 @@ void pb_find_missing(pack_buffer *pb, uint64_t *n_packs,
  * @param ptr - memory area in the buffer from which to wipe @p bytes
  * @param bytes - number of bytes to wipe
  */
-void wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
+static void _wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
     if (ptr + bytes > pb->buf_end)
         bytes -= ptr + bytes - pb->buf_end;
 
@@ -129,17 +129,17 @@ void wipe_buffer(pack_buffer *pb, byte *ptr, size_t bytes) {
     memset(pb->is_present + pos, 0, bytes);
 }
 
-void add_pack(pack_buffer *pb, byte *ptr, const byte *pack) {
+inline static void _add_pack(pack_buffer *pb, byte *ptr, const byte *pack) {
     memcpy(ptr, pack, pb->psize);
     pb->is_present[ptr - pb->buf] = true;
 }
 
-void
-handle_buffer_overflow(pack_buffer *pb, uint64_t missing, const byte *pack) {
+static void
+_handle_buffer_overflow(pack_buffer *pb, uint64_t missing, const byte *pack) {
     // How many bytes left till the buffer end from current head.
     uint64_t bytes_to_end = pb->buf_end - pb->head;
 
-    wipe_buffer(pb, pb->head, bytes_to_end); // Wipe from head to end.
+    _wipe_buffer(pb, pb->head, bytes_to_end); // Wipe from head to end.
 
     // How many slots left till the buffer end from current head.
     // Important to introduce such value, since pb->capacity doesn't
@@ -148,72 +148,72 @@ handle_buffer_overflow(pack_buffer *pb, uint64_t missing, const byte *pack) {
 
     // Reserve space for the rest of missing packages that land
     // in the buffer beginning and new head.
-    wipe_buffer(pb, pb->buf, missing - packs_to_end * pb->psize + pb->psize);
+    _wipe_buffer(pb, pb->buf, missing - packs_to_end * pb->psize + pb->psize);
 
     // Place the pack in its new spot.
     byte *prev_head = pb->head;
 
     pb->head = pb->buf + missing - packs_to_end * pb->psize;
-    add_pack(pb, pb->head, pack);
+    _add_pack(pb, pb->head, pack);
     pb->head += pb->psize;
 
     if ((pb->head >= pb->tail && prev_head >= pb->tail)
         || (pb->head <= pb->tail && prev_head <= pb->tail)) {
         // Head overlapped the tail.
         pb->tail = pb->head + pb->psize;
-        handle_buf_end_overlap(&pb->tail, pb);
+        _handle_buf_end_overlap(&pb->tail, pb);
     }
 }
 
-uint64_t range(pack_buffer *pb) {
+static uint64_t _range(pack_buffer *pb) {
     if (pb->tail <= pb->head) return pb->head - pb->tail;
     else return pb->capacity + pb->head - pb->tail;
 }
 
-void insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
-                             const byte *pack) {
+static void _insert_pack_into_buffer(pack_buffer *pb, uint64_t first_byte_num,
+                                     const byte *pack) {
     // How many space to reserve in bytes for missing packs, if any.
     // Overflow warning: first_byte_num may be less than pb->head_byte_num.
     uint64_t missing = first_byte_num - pb->head_byte_num;
 
     if (pb->head_byte_num > first_byte_num) {
         // Encountered a missing pack.
-        if (pb->head_byte_num - first_byte_num <= range(pb)) {
+        if (pb->head_byte_num - first_byte_num <= _range(pb)) {
             byte *ptr = pb->head - pb->head_byte_num + first_byte_num;
 
             if (ptr < pb->buf) // Left overlap
                 ptr += pb->capacity / pb->psize * pb->psize;
 
-            add_pack(pb, ptr, pack);
+            _add_pack(pb, ptr, pack);
         } // else: Encountered a missing, but ancient package... ignore.
         return;
     } else if (missing > pb->capacity) {
         // This won't fit. Reset the buffer.
         missing = (pb->capacity / pb->psize - 1) * pb->psize;
-        reset_buffer(pb, first_byte_num - missing);
-        add_pack(pb, pb->head + missing, pack);
+        _reset_buffer(pb, first_byte_num - missing);
+        _add_pack(pb, pb->head + missing, pack);
         pb->head = pb->head + missing + pb->psize;
     } else if (pb->head + missing >= pb->buf_end)
         // Buffer overflow.
-        handle_buffer_overflow(pb, missing, pack);
+        _handle_buffer_overflow(pb, missing, pack);
     else {
         if (pb->head < pb->tail && pb->tail <= pb->head + missing + pb->psize) {
             // Tail overlap.
-            wipe_buffer(pb, pb->head, missing + 2 * pb->psize);
+            _wipe_buffer(pb, pb->head, missing + 2 * pb->psize);
             pb->tail = pb->head + missing + 2 * pb->psize;
-            handle_buf_end_overlap(&pb->tail, pb);
+            _handle_buf_end_overlap(&pb->tail, pb);
         }
 
         // Insert normally.
-        add_pack(pb, pb->head + missing, pack);
+        _add_pack(pb, pb->head + missing, pack);
         pb->head = pb->head + missing + pb->psize;
     }
 
     pb->head_byte_num = first_byte_num + pb->psize;
-    handle_buf_end_overlap(&pb->head, pb);
+    _handle_buf_end_overlap(&pb->head, pb);
 }
 
-bool is_in_buffer(pack_buffer *pb, uint64_t first_byte_num) {
+inline static bool _is_in_buffer(pack_buffer *pb, uint64_t first_byte_num) {
     if (pb->head_byte_num < first_byte_num) return false;
 
     uint64_t head_pos = pb->head - pb->buf;
@@ -230,8 +230,8 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
     if (pb->psize != psize) return;
     CHECK_ERRNO(pthread_mutex_lock(&pb->mutex));
 
-    if (!is_in_buffer(pb, first_byte_num))
-        insert_pack_into_buffer(pb, first_byte_num, pack);
+    if (!_is_in_buffer(pb, first_byte_num))
+        _insert_pack_into_buffer(pb, first_byte_num, pack);
 
     if (pb->head_byte_num - pb->byte_zero >= pb->capacity / 4 * 3)
         CHECK_ERRNO(pthread_cond_signal(&pb->byte_zero_wait));
@@ -239,7 +239,7 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
     CHECK_ERRNO(pthread_mutex_unlock(&pb->mutex));
 }
 
-void take_pack_if_present(pack_buffer *pb, void *item) {
+inline static void _take_pack_if_present(pack_buffer *pb, void *item) {
     if (pb->is_present[pb->tail - pb->buf]) {
         memcpy(item, pb->tail, pb->psize);
         pb->is_present[pb->tail - pb->buf] = false;
@@ -255,7 +255,7 @@ void take_pack_if_present(pack_buffer *pb, void *item) {
 
     if (pb->head != pb->tail) {
         pb->tail += pb->psize;
-        handle_buf_end_overlap(&pb->tail, pb);
+        _handle_buf_end_overlap(&pb->tail, pb);
     }
 }
 
@@ -273,7 +273,7 @@ uint64_t pb_pop_front(pack_buffer *pb, void *item) {
         CHECK_ERRNO(pthread_cond_wait(&pb->byte_zero_wait, &pb->mutex));
     }
 
-    take_pack_if_present(pb, item);
+    _take_pack_if_present(pb, item);
 
     uint64_t curr_psize = pb->psize;
 

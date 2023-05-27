@@ -89,8 +89,9 @@ inline static int create_recv_socket(uint16_t port, struct sockaddr_in
     tv.tv_usec = 0;
     CHECK_ERRNO(setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof
             (tv)));
-    CHECK_ERRNO(setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &true, sizeof
-            (int)));
+    int opt = 1;
+    CHECK_ERRNO(
+            setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)));
 
     enable_multicast(socket_fd, mcast_addr);
 
@@ -120,10 +121,10 @@ inline static size_t receive_pack(int socket_fd, struct audio_pack **pack, byte
     memcpy(&(*pack)->first_byte_num, buffer + 8, 8);
     (*pack)->audio_data = buffer + 16;
 
-    rd->curr_session_id = ntohll((*pack)->session_id);
+    rd->curr_session_id = be64toh((*pack)->session_id);
 
     if (rd->curr_session_id > rd->last_session_id)
-        pb_reset(rd->pb, *psize, ntohll((*pack)->first_byte_num));
+        pb_reset(rd->pb, *psize, be64toh((*pack)->first_byte_num));
 
     if (rd->curr_session_id < rd->last_session_id)
         return 0;

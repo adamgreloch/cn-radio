@@ -9,7 +9,7 @@
 
 static bool debug = false;
 
-void *pack_sender(void *args) {
+static void *pack_sender(void *args) {
     sender_data *sd = args;
     uint64_t pack_num = 0;
 
@@ -26,8 +26,8 @@ void *pack_sender(void *args) {
         if (sd->psize == read_pack(stdin, sd->psize, read_bytes)) {
             struct audio_pack pack;
 
-            pack.session_id = htonll(sd->session_id);
-            pack.first_byte_num = htonll(pack_num * sd->psize);
+            pack.session_id = htobe64(sd->session_id);
+            pack.first_byte_num = be64toh(pack_num * sd->psize);
             pack.audio_data = read_bytes;
 
             send_pack(mcast_send_sock_fd, &mcast_addr, &pack, sd);
@@ -46,7 +46,7 @@ void *pack_sender(void *args) {
     return 0;
 }
 
-void *ctrl_listener(void *args) {
+static void *ctrl_listener(void *args) {
     sender_data *sd = args;
     int ctrl_sock_fd = create_socket(sd->ctrl_port);
 
@@ -101,7 +101,7 @@ void *ctrl_listener(void *args) {
     return 0;
 }
 
-void *pack_retransmitter(void *args) {
+static void *pack_retransmitter(void *args) {
     sender_data *sd = args;
 
     int send_sock_fd = open_socket();

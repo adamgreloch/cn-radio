@@ -62,7 +62,7 @@ stations *init_stations() {
     return st;
 }
 
-int _str_compare(char *name1, char *name2) {
+static int _str_compare(char *name1, char *name2) {
     size_t pos = 0;
 
     while (true) {
@@ -79,7 +79,7 @@ int _str_compare(char *name1, char *name2) {
     }
 }
 
-int _station_compare(const void *a, const void *b) {
+static int _station_compare(const void *a, const void *b) {
     station *st1 = *(station **) a;
     station *st2 = *(station **) b;
     if (!st1 && !st2) return 0;
@@ -88,7 +88,7 @@ int _station_compare(const void *a, const void *b) {
     return _str_compare(st1->name, st2->name);
 }
 
-void _sort_stations(stations *st) {
+static void _sort_stations(stations *st) {
     qsort(st->data, st->size, sizeof(station *), _station_compare);
 
     uint64_t i = 0;
@@ -151,19 +151,16 @@ st_update(stations *st, char *mcast_addr_str, uint16_t port, char *name) {
             st->current = curr;
             st->current_pos = empty;
             st->change_pending = true;
-            fprintf(stderr, "set current to %s\n", st->current->mcast_addr);
             CHECK_ERRNO(pthread_cond_broadcast(&st->wait_for_found));
         }
     }
 
     _sort_stations(st);
 
-    fprintf(stderr, "station %s updated\n", mcast_addr_str);
-
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
 
-void _move_selection(stations *st, int delta) {
+static void _move_selection(stations *st, int delta) {
     if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     if (st->count > 1) {
@@ -234,11 +231,8 @@ bool st_switch_if_changed(stations *st, station *new_station) {
     bool res = false;
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
 
-    while (!st->current) {
-        fprintf(stderr, "wait switch if changed\n");
+    while (!st->current)
         CHECK_ERRNO(pthread_cond_wait(&st->wait_for_found, &st->mutex));
-        fprintf(stderr, "wake switch if changed\n");
-    }
 
     if (st->change_pending) {
         *new_station = *st->current;
@@ -253,11 +247,9 @@ bool st_switch_if_changed(stations *st, station *new_station) {
 void st_delete_inactive_stations(stations *st, uint64_t inactivity_sec) {
     if (!st) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
-    while (st->change_pending) {
-        fprintf(stderr, "wait for change inactive\n");
+
+    while (st->change_pending)
         CHECK_ERRNO(pthread_cond_wait(&st->wait_for_change, &st->mutex));
-        fprintf(stderr, "wake for change inactive\n");
-    }
 
     if (st->count > 0) {
         uint64_t now = time(NULL);

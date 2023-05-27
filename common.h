@@ -142,23 +142,6 @@ inline static void enable_multicast(int socket_fd, struct sockaddr_in
                            sizeof(opt)));
 }
 
-
-inline static uint64_t htonll(uint64_t x) {
-#if __BIG_ENDIAN__
-    return x;
-#else
-    return ((uint64_t) htonl((x) & 0xFFFFFFFFLL) << 32) | htonl((x) >> 32);
-#endif
-}
-
-inline static uint64_t ntohll(uint64_t x) {
-#if __BIG_ENDIAN__
-    return x;
-#else
-    return ((uint64_t) ntohl((x) & 0xFFFFFFFFLL) << 32) | ntohl((x) >> 32);
-#endif
-}
-
 inline static in_addr_t check_address(char *addr) {
     in_addr_t in_addr;
     int res = inet_pton(AF_INET, addr, &in_addr);
