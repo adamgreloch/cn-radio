@@ -39,7 +39,7 @@ static void *pack_sender(void *args) {
 
     CHECK_ERRNO(close(mcast_send_sock_fd));
 
-    sd->finished = true;
+    mark_finished(sd);
 
     free(read_bytes);
 
@@ -48,7 +48,7 @@ static void *pack_sender(void *args) {
 
 static void *ctrl_listener(void *args) {
     sender_data *sd = args;
-    int ctrl_sock_fd = create_socket(sd->ctrl_port);
+    int ctrl_sock_fd = create_timeoutable_socket(sd->ctrl_port);
 
     char *buffer = malloc(CTRL_BUF_SIZE);
     uint64_t *packs = malloc(CTRL_BUF_SIZE);
@@ -58,14 +58,13 @@ static void *ctrl_listener(void *args) {
     socklen_t address_length = (socklen_t) sizeof(receiver_addr);
 
     int flags = 0;
-    errno = 0;
 
     int wrote_size;
     ssize_t sent_size;
 
     sockaddr_and_len receiver_sal;
 
-    while (!sd->finished) {
+    while (!is_finished(sd)) {
         memset(buffer, 0, CTRL_BUF_SIZE);
 
         recvfrom(ctrl_sock_fd, buffer, CTRL_BUF_SIZE, flags,
@@ -76,6 +75,7 @@ static void *ctrl_listener(void *args) {
                 memset(buffer, 0, CTRL_BUF_SIZE);
                 wrote_size = write_reply(buffer, sd->mcast_addr_str, sd->port,
                                          sd->sender_name);
+                errno = 0;
                 sent_size = sendto(ctrl_sock_fd, buffer, wrote_size,
                                    flags, (struct sockaddr *)
                                            &receiver_addr,
@@ -97,6 +97,8 @@ static void *ctrl_listener(void *args) {
     }
 
     CHECK_ERRNO(close(ctrl_sock_fd));
+    free(buffer);
+    free(packs);
 
     return 0;
 }
@@ -114,7 +116,7 @@ static void *pack_retransmitter(void *args) {
 
     sockaddr_and_len receiver_addr;
 
-    while (!sd->finished) {
+    while (!is_finished(sd)) {
         usleep(sd->rtime_u);
         while (rq_pop_pack_for_addr(sd->rq, audio_data, &first_byte_num,
                                     &receiver_addr)) {
@@ -126,6 +128,10 @@ static void *pack_retransmitter(void *args) {
                 fprintf(stderr, "retransmitted %lu\n", first_byte_num);
         }
     }
+
+    CHECK_ERRNO(close(send_sock_fd));
+    free(audio_data);
+
     return 0;
 }
 

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <netinet/in.h>
 #include <time.h>
 #include "err.h"
@@ -27,6 +28,8 @@ struct sender_data {
     rexmit_queue *rq;
 
     sender_opts *opts;
+
+    pthread_mutex_t mutex;
 };
 
 typedef struct sender_data sender_data;
@@ -54,6 +57,8 @@ inline static sender_data *sd_init(int argc, char **argv) {
     sd->rq = rq_init(sd->psize, sd->fsize);
 
     sd->opts = opts;
+
+    CHECK_ERRNO(pthread_mutex_init(&sd->mutex, NULL));
 
     return sd;
 }
@@ -90,5 +95,18 @@ inline static void send_pack(int socket_fd, const struct sockaddr_in
     ENSURE(sent_size == data_size);
 }
 
+inline static void mark_finished(sender_data *sd) {
+    CHECK_ERRNO(pthread_mutex_lock(&sd->mutex));
+    sd->finished = true;
+    CHECK_ERRNO(pthread_mutex_unlock(&sd->mutex));
+}
+
+inline static bool is_finished(sender_data *sd) {
+    bool res;
+    CHECK_ERRNO(pthread_mutex_lock(&sd->mutex));
+    res = sd->finished;
+    CHECK_ERRNO(pthread_mutex_unlock(&sd->mutex));
+    return res;
+}
 
 #endif //_SENDER_UTILS_

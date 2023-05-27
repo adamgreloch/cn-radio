@@ -63,6 +63,21 @@ inline static int create_socket(uint16_t port) {
     return socket_fd;
 }
 
+inline static int create_timeoutable_socket(uint16_t port) {
+    int socket_fd = create_socket(port);
+
+    struct timeval tv;
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    CHECK_ERRNO(setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof
+            (tv)));
+    int opt = 1;
+    CHECK_ERRNO(
+            setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)));
+
+    return socket_fd;
+}
+
 inline static void bind_socket(int socket_fd, uint16_t port) {
     struct sockaddr_in server_address;
     server_address.sin_family = AF_INET; // IPv4

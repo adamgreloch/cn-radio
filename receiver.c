@@ -36,8 +36,8 @@ static void *pack_receiver(void *args) {
                 CHECK_ERRNO(close(socket_fd));
 
             inet_aton(curr_station.mcast_addr, &station_addr.sin_addr);
-            socket_fd = create_recv_socket(curr_station.port,
-                                           &station_addr);
+            socket_fd = create_timeoutable_socket(curr_station.port);
+            enable_multicast(socket_fd, &station_addr);
             rd->last_session_id = 0;
         }
 
@@ -47,6 +47,8 @@ static void *pack_receiver(void *args) {
             pb_push_back(rd->pb, be64toh(pack->first_byte_num),
                          pack->audio_data, psize);
     }
+
+    return 0;
 }
 
 static void *pack_printer(void *args) {
@@ -63,6 +65,8 @@ static void *pack_printer(void *args) {
         psize = pb_pop_front(rd->pb, write_buffer);
         fwrite(write_buffer, psize, sizeof(byte), stdout);
     }
+
+    return 0;
 }
 
 static void *missing_reporter(void *args) {
@@ -82,7 +86,6 @@ static void *missing_reporter(void *args) {
     int wrote_size;
     ssize_t sent_size;
     int flags = 0;
-    errno = 0;
 
     uint64_t *missing_buf = NULL;
     uint64_t buf_size = 0;
@@ -106,6 +109,7 @@ static void *missing_reporter(void *args) {
                 CHECK_ERRNO(pthread_mutex_lock(&rd->mutex));
                 rd->client_address.sin_port = htons(rd->ctrl_port);
 
+                errno = 0;
                 sent_size = sendto(send_sock_fd, write_buffer, wrote_size,
                                    flags, (struct sockaddr *)
                                            &rd->client_address,
@@ -116,6 +120,8 @@ static void *missing_reporter(void *args) {
         n_packs_sent = 0;
         usleep(rd->rtime_u);
     }
+
+    return 0;
 }
 
 int main(int argc, char **argv) {

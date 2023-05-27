@@ -80,24 +80,6 @@ inline static void handle_input(char *nav_buffer, stations *st) {
         }
 }
 
-inline static int create_recv_socket(uint16_t port, struct sockaddr_in
-*mcast_addr) {
-    int socket_fd = create_socket(port);
-
-    struct timeval tv;
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-    CHECK_ERRNO(setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof
-            (tv)));
-    int opt = 1;
-    CHECK_ERRNO(
-            setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)));
-
-    enable_multicast(socket_fd, mcast_addr);
-
-    return socket_fd;
-}
-
 inline static size_t receive_pack(int socket_fd, struct audio_pack **pack, byte
 *buffer,
                                   uint64_t *psize, receiver_data *rd) {
