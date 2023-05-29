@@ -2,17 +2,58 @@
 #include <unistd.h>
 #include "rexmit_queue.h"
 
-static bool debug = false;
+static bool debug = true;
 
-struct addr_list {
-    struct sockaddr_and_len addr;
-    uint64_t first_byte_num;
-    int rexmit_session;
+typedef struct tree_node tree_node;
 
-    struct addr_list *next;
+struct tree_node {
+    tree_node *left;
+    uint64_t num;
+    tree_node *right;
 };
 
-typedef struct addr_list addr_list;
+tree_node *init_node(uint64_t num) {
+    tree_node *node = malloc(sizeof(tree_node));
+    node->num = num;
+    node->left = node->right = NULL;
+    return node;
+}
+
+tree_node *insert(tree_node *root, uint64_t num) {
+    if (!root)
+        return init_node(num);
+    else if (root->num < num)
+        root->left = insert(root->left, num);
+    else if (root->num > num)
+        root->right = insert(root->right, num);
+
+    return root;
+}
+
+uint64_t tree_to_arr(tree_node *root, uint64_t **arr, uint64_t *arr_size,
+                     uint64_t count) {
+    if (root) {
+        count = tree_to_arr(root->left, arr, arr_size, count);
+        if (*arr_size == count) {
+            if (*arr_size == 0) *arr_size = 1;
+            else *arr_size *= 2;
+            *arr = realloc(*arr, *arr_size * sizeof(uint64_t));
+            if (!(*arr))
+                fatal("realloc");
+        }
+        (*arr)[count++] = root->num;
+        count = tree_to_arr(root->right, arr, arr_size, count);
+    }
+    return count;
+}
+
+void free_tree(tree_node *root) {
+    if (root) {
+        free_tree(root->left);
+        free_tree(root->right);
+        free(root);
+    }
+}
 
 struct rexmit_queue {
     byte *queue;
@@ -28,17 +69,9 @@ struct rexmit_queue {
     uint64_t fsize;
     uint64_t psize;
 
-    addr_list *list_tail;
-    addr_list *list_head;
-
-    uint64_t list_len;
-    int curr_rexmit_session;
-    bool session_finished;
+    tree_node *pack_tree;
 
     pthread_mutex_t mutex;
-
-    bool during_rexmit;
-    pthread_cond_t rexmit_end_wait;
 };
 
 typedef struct rexmit_queue rexmit_queue;
@@ -57,24 +90,16 @@ rexmit_queue *rq_init(uint64_t psize, uint64_t fsize) {
     rq->count = 0;
     rq->psize = psize;
     rq->fsize = fsize;
-    rq->curr_rexmit_session = 0;
-    rq->session_finished = true;
-    rq->during_rexmit = false;
 
-    rq->list_head = rq->list_tail = NULL;
-    rq->list_len = 0;
+    rq->pack_tree = NULL;
 
     CHECK_ERRNO(pthread_mutex_init(&rq->mutex, NULL));
-    CHECK_ERRNO(pthread_cond_init(&rq->rexmit_end_wait, NULL));
     return rq;
 }
 
 void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack) {
     if (!rq || !pack) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
-
-    while (rq->during_rexmit)
-        CHECK_ERRNO(pthread_cond_wait(&rq->rexmit_end_wait, &rq->mutex));
 
     if (rq->head == rq->tail && rq->count > 0) {
         // delete tail elem
@@ -95,8 +120,7 @@ void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack) {
         rq->head = rq->queue;
 
     if (debug)
-        fprintf(stderr, "added pack %lu (%lu, %lu)\n", rq->head_byte_num,
-                rq->count, rq->list_len);
+        fprintf(stderr, "added pack %lu\n", rq->head_byte_num);
 
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
 }
@@ -111,8 +135,7 @@ static byte *_find_pack(rexmit_queue *rq, uint64_t first_byte_num) {
     return ptr;
 }
 
-static void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num,
-                               struct sockaddr_and_len *receiver_addr) {
+static void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num) {
     if (first_byte_num < rq->tail_byte_num ||
         first_byte_num > rq->head_byte_num) {
         if (debug)
@@ -121,104 +144,47 @@ static void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num,
         return; // request invalid, ignore
     }
 
-    addr_list *al = malloc(sizeof(addr_list));
-    al->addr = *receiver_addr;
-    al->next = NULL;
-    al->first_byte_num = first_byte_num;
-
-    al->rexmit_session = rq->curr_rexmit_session;
-
-    if (rq->during_rexmit)
-        al->rexmit_session = 1 - al->rexmit_session;
-
-    if (!rq->list_tail)
-        rq->list_tail = al;
-
-    if (rq->list_head)
-        rq->list_head->next = al;
-
-    rq->list_head = al;
-    rq->list_len++;
+    rq->pack_tree = insert(rq->pack_tree, first_byte_num);
 
     if (debug)
-        fprintf(stderr, "bound addr to %lu (%lu, %lu)\n", first_byte_num,
-                rq->count, rq->list_len);
+        fprintf(stderr, "bound addr to %lu\n", first_byte_num);
 }
 
-void rq_bind_addr(rexmit_queue *rq, uint64_t *packs, uint64_t n_packs, struct
-        sockaddr_and_len *receiver_addr) {
-    if (!rq || !packs) fatal("null argument");
+void
+rq_add_requests(rexmit_queue *rq, uint64_t *requested_packs, uint64_t n_packs) {
+    if (!rq || !requested_packs) fatal("null argument");
     if (n_packs == 0) return;
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
     for (size_t i = 0; i < n_packs; i++)
-        _bind_addr_to_pack(rq, packs[i], receiver_addr);
+        _bind_addr_to_pack(rq, requested_packs[i]);
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
 }
 
-void rq_get_head_tail_byte_nums(rexmit_queue *rq, uint64_t *head_byte_num,
-                                uint64_t *tail_byte_num) {
+uint64_t rq_get_requests(rexmit_queue *rq, uint64_t **requested_packs,
+                         uint64_t *arr_size) {
     if (!rq) fatal("null argument");
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
-    *head_byte_num = rq->head_byte_num;
-    *tail_byte_num = rq->tail_byte_num;
+    if (rq->count == 0) {
+        CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
+        return 0;
+    }
+    uint64_t count = tree_to_arr(rq->pack_tree, requested_packs, arr_size, 0);
+    free_tree(rq->pack_tree);
+    rq->pack_tree = NULL;
+
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
+    return count;
 }
 
-static addr_list *_pop_from_list(rexmit_queue *rq) {
-    addr_list *popped = rq->list_tail;
-    rq->list_tail = popped->next;
-    rq->list_len--;
-    if (!rq->list_tail)
-        rq->list_head = NULL;
-
-    return popped;
-}
-
-bool rq_pop_pack_for_addr(rexmit_queue *rq, byte *pack_data,
-                          uint64_t *first_byte_num,
-                          struct sockaddr_and_len *receiver_addr) {
-    if (!rq) fatal("null argument");
-
+bool rq_get_pack(rexmit_queue *rq, byte *pack, uint64_t first_byte_num) {
     CHECK_ERRNO(pthread_mutex_lock(&rq->mutex));
-    if (rq->count == 0 || rq->list_len == 0 || rq->session_finished) {
-        if (rq->session_finished)
-            rq->session_finished = false;
+    if (first_byte_num < rq->tail_byte_num ||
+        first_byte_num > rq->head_byte_num) {
         CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
         return false;
     }
-
-    if (!rq->during_rexmit)
-        rq->during_rexmit = true;
-
-    addr_list *al = NULL;
-    bool pack_ready = false;
-
-    while (!pack_ready && rq->list_len > 0) {
-        al = _pop_from_list(rq);
-        if (al && rq->tail_byte_num <= al->first_byte_num
-            && al->first_byte_num <= rq->head_byte_num) {
-            memcpy(pack_data, _find_pack(rq, al->first_byte_num),
-                   rq->psize);
-            *first_byte_num = al->first_byte_num;
-            pack_ready = true;
-            if (debug)
-                fprintf(stderr, "popped pack (%lu, %lu, sess=%d)\n", rq->count,
-                        rq->list_len, rq->curr_rexmit_session);
-        }
-        if (rq->list_len == 0 ||
-            al->rexmit_session != rq->curr_rexmit_session) {
-            rq->session_finished = true;
-            rq->during_rexmit = false;
-            rq->curr_rexmit_session = 1 - rq->curr_rexmit_session;
-            CHECK_ERRNO(pthread_cond_signal(&rq->rexmit_end_wait));
-            break;
-        }
-    }
-
-    if (al)
-        *receiver_addr = al->addr;
-
+    byte *src = _find_pack(rq, first_byte_num);
+    memcpy(pack, src, rq->psize);
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
-
-    return pack_ready;
+    return true;
 }

@@ -58,6 +58,14 @@ inline static receiver_data *rd_init(int argc, char **argv) {
     return rd;
 }
 
+/**
+ * Writes a telnet negotiation to descriptor @p fd using a buffer @p buf in
+ * order to disable telnet's linemode and make it send every keystroke
+ * instantly to the server. "Negotiation" is quite euphemistic here, since we
+ * don't take telnet's refusal to cooperate as an option.
+ * @param fd - file descriptor number
+ * @param buf - message buffer
+ */
 inline static void negotiate_telnet(int fd, char *buf) {
     // IAC DO LINEMODE, IAC SB LINEMODE MODE 0 IAC SE, IAC WILL ECHO
     char telnet_negotation[] = {255, 253, 34, 255, 250, 34, 1, 0, 255, 240,
@@ -68,6 +76,12 @@ inline static void negotiate_telnet(int fd, char *buf) {
     ENSURE(sent == sizeof(telnet_negotation));
 }
 
+/**
+ * Parse the reply from the telnet user. Do an appropriate action if he sent
+ * arrow down or up (switch stations), else ignore.
+ * @param nav_buffer - buffer in which the reply is stored
+ * @param st - pointer to stations
+ */
 inline static void handle_input(char *nav_buffer, stations *st) {
     if (nav_buffer[0] == '\033' && nav_buffer[1] == '\133')
         switch (nav_buffer[2]) {
@@ -96,6 +110,8 @@ inline static size_t receive_pack(int socket_fd, struct audio_pack **pack, byte
 
     if (read_length < 0)
         return 0;
+
+    st_bump_current_station(rd->st);
 
     *psize = read_length - 16;
 

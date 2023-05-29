@@ -9,6 +9,6 @@ add_executable(ctrl_protocol_tests ctrl_protocol.h ctrl_protocol.c
         ctrl_protocol_tests.c)
 add_executable(receiver_ui_tests receiver_ui.h receiver_ui.c
         receiver_ui_tests.c)
-add_executable(rexmit_queue_tests rexmit_queue.h common.h rexmit_queue.c
+add_executable(rexmit_queue_tests common.h
         rexmit_queue_tests.c)
 target_link_libraries(sikradio-receiver pthread)

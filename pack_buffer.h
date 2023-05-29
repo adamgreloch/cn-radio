@@ -41,7 +41,7 @@ void pb_push_back(pack_buffer *pb, uint64_t first_byte_num, const byte *pack,
 /**
  * Pops oldest pack from the pack buffer @p pb and stores it in @p item.
  * Blocks if pack buffer @p pb is empty or haven't received a pack with
- * byte_num at least @p 0.75*pb->capacity apart from @p pb->byte_zero.
+ * byte_num at least @p 0.75*pb->size apart from @p pb->byte_zero.
  *
  * If unable to take a pack from the buffer, it leaves @p item unchanged.
  * @param pb - pointer to pack buffer

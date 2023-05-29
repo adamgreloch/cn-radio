@@ -203,6 +203,7 @@ st_print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
         *buf = realloc(*buf, wrote);
         if (!(*buf))
             fatal("realloc");
+        *buf_size = wrote;
     }
 
     memcpy(*buf, st->ui_buffer, wrote);
@@ -274,6 +275,12 @@ void st_wait_until_station_found(stations *st) {
     CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
     while (!st->current)
         CHECK_ERRNO(pthread_cond_wait(&st->wait_for_found, &st->mutex));
+    CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
+}
+
+void st_bump_current_station(stations *st) {
+    CHECK_ERRNO(pthread_mutex_lock(&st->mutex));
+    st->current->last_heard = time(NULL);
     CHECK_ERRNO(pthread_mutex_unlock(&st->mutex));
 }
 
@@ -421,13 +428,12 @@ void *station_discoverer(void *args) {
                                      MSG_DONTWAIT,
                                      (struct sockaddr *) &sender_addr,
                                      &sender_addr_len)) > 0) {
-            if (what_message(write_buffer) == REPLY) {
+            if (what_message(write_buffer) == REPLY &&
                 parse_reply(write_buffer, recv_size, mcast_addr_str,
                             &sender_port,
-                            sender_name);
+                            sender_name) != -1)
                 st_update(rd->st, mcast_addr_str, sender_port,
                           sender_name);
-            }
 
             memset(mcast_addr_str, 0, sizeof(mcast_addr_str));
             memset(sender_name, 0, sizeof(sender_name));

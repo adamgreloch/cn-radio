@@ -8,6 +8,7 @@
 #include <string.h>
 #include <ctype.h>
 #include "err.h"
+#include "common.h"
 #include "receiver_config.h"
 
 #define NUM 438473
@@ -94,11 +95,10 @@ inline static int parse_string_from_opt(char *dest, size_t dest_size) {
 }
 
 inline static int check_opt_for_numeric() {
-    for (size_t i = 0; i < strlen(optarg); i++)
-        if (optarg[i] < '0' || '9' < optarg[i]) {
-            fprintf(stderr, "Argument must be numeric/positive: %s\n", optarg);
-            return 1;
-        }
+    if (!is_number(optarg)) {
+        fprintf(stderr, "Argument must be numeric/positive: %s\n", optarg);
+        return 1;
+    }
     return 0;
 }
 
@@ -126,11 +126,11 @@ inline static int parse_name_from_opt(char *dest, size_t dest_size) {
     return 0;
 }
 
-inline static int parse_nonzero_from_opt(uint64_t *dest) {
-    errno = 0;
+inline static int parse_num_from_opt(uint64_t *dest, bool nonzero) {
     if (check_opt_for_numeric() == 1) return 1;
+    errno = 0;
     uint64_t n = strtoull(optarg, NULL, 10);
-    if (n == 0 || errno != 0) {
+    if ((nonzero && n == 0) || errno != 0) {
         fprintf(stderr,
                 "Invalid argument: %s\n", optarg);
         return 1;
@@ -140,8 +140,8 @@ inline static int parse_nonzero_from_opt(uint64_t *dest) {
 }
 
 inline static int parse_port_from_opt(uint16_t *dest) {
-    errno = 0;
     if (check_opt_for_numeric() == 1) return 1;
+    errno = 0;
     uint64_t n = strtoull(optarg, NULL, 10);
     if (n == 0 || n > 65535 || errno != 0) {
         fprintf(stderr,
@@ -173,32 +173,39 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
         switch (c) {
             case 'a':
                 aflag = 1;
-                errflag = parse_string_from_opt(opts->mcast_addr_str, sizeof
+                errflag |= parse_string_from_opt(opts->mcast_addr_str, sizeof
                         (opts->mcast_addr_str));
                 break;
             case 'C':
-                errflag = parse_port_from_opt(&opts->ctrl_port);
+                errflag |= parse_port_from_opt(&opts->ctrl_port);
                 break;
             case 'R':
-                errflag = parse_nonzero_from_opt(&opts->rtime);
+                errflag |= parse_num_from_opt(&opts->rtime, true);
                 break;
             case 'n':
-                errflag = parse_name_from_opt(opts->sender_name,
+                errflag |= parse_name_from_opt(opts->sender_name,
                                               MAX_NAME_LEN);
                 break;
             case 'p':
-                errflag = parse_nonzero_from_opt(&opts->psize);
+                errflag |= parse_num_from_opt(&opts->psize, true);
+                if (opts->psize + sizeof(struct audio_pack) >
+                        UDP_IPV4_DATASIZE) {
+                    fprintf(stderr,
+                            "Pack size larger than possible to send: %lu\n",
+                            opts->psize);
+                    errflag = 1;
+                }
                 break;
             case 'f':
-                errflag = parse_nonzero_from_opt(&opts->fsize);
+                errflag |= parse_num_from_opt(&opts->fsize, false);
                 break;
             case 'P':
-                errflag = parse_port_from_opt(&opts->port);
+                errflag |= parse_port_from_opt(&opts->port);
                 break;
             case '?':
                 if (optopt == 'a' || optopt == 'p' ||
                     optopt == 'P' || optopt == 'n' || optopt == 'C' ||
-                    optopt == 'R')
+                    optopt == 'R' || optopt == 'f')
                     fprintf(stderr, "Option -%c requires an argument.\n",
                             optopt);
                 else if (isprint(optopt))
@@ -248,25 +255,25 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
     while ((c = getopt(argc, argv, "n:b:d:C:R:U:")) != -1) {
         switch (c) {
             case 'd':
-                errflag = parse_string_from_opt(opts->discover_addr, sizeof
+                errflag |= parse_string_from_opt(opts->discover_addr, sizeof
                         (opts->discover_addr));
                 break;
             case 'C':
-                errflag = parse_string_from_opt(opts->ctrl_portstr, sizeof
+                errflag |= parse_string_from_opt(opts->ctrl_portstr, sizeof
                         (opts->ctrl_portstr));
                 errflag |= parse_port_from_opt(&opts->ctrl_port);
                 break;
             case 'U':
-                errflag = parse_port_from_opt(&opts->ui_port);
+                errflag |= parse_port_from_opt(&opts->ui_port);
                 break;
             case 'R':
-                errflag = parse_nonzero_from_opt(&opts->rtime);
+                errflag |= parse_num_from_opt(&opts->rtime, true);
                 break;
             case 'b':
-                errflag = parse_nonzero_from_opt(&opts->bsize);
+                errflag |= parse_num_from_opt(&opts->bsize, true);
                 break;
             case 'n':
-                errflag = parse_name_from_opt(opts->sender_name,
+                errflag |= parse_name_from_opt(opts->sender_name,
                                               MAX_NAME_LEN);
                 break;
             case '?':

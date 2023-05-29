@@ -21,6 +21,9 @@ struct sender_data {
     uint64_t rtime_u;
     uint64_t session_id;
 
+    int mcast_send_sock_fd;
+    struct sockaddr_in mcast_addr;
+
     bool finished;
 
     char *send_buffer;
@@ -47,13 +50,18 @@ inline static sender_data *sd_init(int argc, char **argv) {
     sd->session_id = time(NULL);
     sd->finished = false;
 
+    sd->mcast_addr_str = opts->mcast_addr_str;
+    sd->mcast_send_sock_fd = socket(PF_INET, SOCK_DGRAM, 0);
+    sd->mcast_addr = get_send_address(sd->mcast_addr_str,
+                                                     sd->port);
+    enable_multicast(sd->mcast_send_sock_fd, &sd->mcast_addr);
+
     sd->send_buffer = calloc(sd->psize + 16, 1);
     if (!sd->send_buffer)
         fatal("calloc");
 
     check_address(opts->mcast_addr_str);
 
-    sd->mcast_addr_str = opts->mcast_addr_str;
     sd->rq = rq_init(sd->psize, sd->fsize);
 
     sd->opts = opts;
@@ -64,6 +72,7 @@ inline static sender_data *sd_init(int argc, char **argv) {
 }
 
 inline static void sd_free(sender_data *sd) {
+    CHECK_ERRNO(close(sd->mcast_send_sock_fd));
     free(sd->send_buffer);
     free(sd->opts);
     free(sd);

@@ -7,18 +7,13 @@
 #include "rexmit_queue.h"
 #include "sender_utils.h"
 
-static bool debug = false;
+static bool debug = true;
 
 static void *pack_sender(void *args) {
     sender_data *sd = args;
     uint64_t pack_num = 0;
 
     byte *read_bytes = (byte *) malloc(sd->psize);
-
-    int mcast_send_sock_fd = socket(PF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in mcast_addr = get_send_address(sd->mcast_addr_str,
-                                                     sd->port);
-    enable_multicast(mcast_send_sock_fd, &mcast_addr);
 
     while (!feof(stdin)) {
         memset(read_bytes, 0, sd->psize);
@@ -30,14 +25,12 @@ static void *pack_sender(void *args) {
             pack.first_byte_num = be64toh(pack_num * sd->psize);
             pack.audio_data = read_bytes;
 
-            send_pack(mcast_send_sock_fd, &mcast_addr, &pack, sd);
+            send_pack(sd->mcast_send_sock_fd, &sd->mcast_addr, &pack, sd);
             rq_add_pack(sd->rq, &pack);
 
             pack_num++;
         } else break;
     }
-
-    CHECK_ERRNO(close(mcast_send_sock_fd));
 
     mark_finished(sd);
 
@@ -62,8 +55,6 @@ static void *ctrl_listener(void *args) {
     int wrote_size;
     ssize_t sent_size;
 
-    sockaddr_and_len receiver_sal;
-
     while (!is_finished(sd)) {
         memset(buffer, 0, CTRL_BUF_SIZE);
 
@@ -87,11 +78,7 @@ static void *ctrl_listener(void *args) {
                 parse_rexmit(buffer, packs, &n_packs);
                 if (debug)
                     fprintf(stderr, "got rexmit!\n");
-
-                receiver_sal.addr = receiver_addr;
-                receiver_sal.addr_len = address_length;
-
-                rq_bind_addr(sd->rq, packs, n_packs, &receiver_sal);
+                rq_add_requests(sd->rq, packs, n_packs);
                 break;
         }
     }
@@ -110,26 +97,32 @@ static void *pack_retransmitter(void *args) {
     bind_socket(send_sock_fd, 0); // bind to any port
 
     byte *audio_data = malloc(sd->psize);
-    uint64_t first_byte_num;
 
     struct audio_pack pack;
 
-    sockaddr_and_len receiver_addr;
+    uint64_t *requested_nums = NULL;
+    uint64_t arr_size = 0;
+    uint64_t n_packs;
 
     while (!is_finished(sd)) {
-        usleep(sd->rtime_u);
-        while (rq_pop_pack_for_addr(sd->rq, audio_data, &first_byte_num,
-                                    &receiver_addr)) {
-            pack.first_byte_num = first_byte_num;
-            pack.session_id = sd->session_id;
-            pack.audio_data = audio_data;
-            send_pack(send_sock_fd, &receiver_addr.addr, &pack, sd);
-            if (debug)
-                fprintf(stderr, "retransmitted %lu\n", first_byte_num);
+        if ((n_packs = rq_get_requests(sd->rq, &requested_nums,
+                                       &arr_size)) > 0) {
+            fprintf(stderr, "%lu to retransmit\n", n_packs);
+            for (uint64_t i = 0; i < n_packs; i++)
+                if (rq_get_pack(sd->rq, audio_data, requested_nums[i])) {
+                    pack.first_byte_num = htobe64(requested_nums[i]);
+                    pack.session_id = htobe64(sd->session_id);
+                    pack.audio_data = audio_data;
+                    send_pack(sd->mcast_send_sock_fd, &sd->mcast_addr, &pack,
+                              sd);
+                    if (debug)
+                        fprintf(stderr, "retransmitted %lu\n",
+                                requested_nums[i]);
+                }
         }
+        usleep(sd->rtime_u);
     }
 
-    CHECK_ERRNO(close(send_sock_fd));
     free(audio_data);
 
     return 0;

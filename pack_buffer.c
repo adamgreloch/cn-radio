@@ -2,6 +2,8 @@
 #include <pthread.h>
 #include <assert.h>
 
+static bool debug = false;
+
 struct pack_buffer {
     byte *buf;                                        /**< data buffer */
     byte *buf_end;                             /**< end of data buffer */
@@ -97,8 +99,12 @@ void pb_find_missing(pack_buffer *pb, uint64_t *n_packs,
             missing_byte_num = pb->head_byte_num - (pb->head - shift - pos);
 
             if (missing_byte_num < pb->head_byte_num &&
-                missing_byte_num > pb->byte_zero)
+                missing_byte_num > pb->byte_zero) {
                 (*missing_buf)[last++] = missing_byte_num;
+                if (debug)
+                    fprintf(stderr, "missing %lu\n", missing_byte_num);
+            }
+
         }
 
         pos += pb->psize;
@@ -142,7 +148,7 @@ _handle_buffer_overflow(pack_buffer *pb, uint64_t missing, const byte *pack) {
     _wipe_buffer(pb, pb->head, bytes_to_end); // Wipe from head to end.
 
     // How many slots left till the buffer end from current head.
-    // Important to introduce such value, since pb->capacity doesn't
+    // Important to introduce such value, since pb->size doesn't
     // need to be divisible by pb->psize.
     uint64_t packs_to_end = bytes_to_end / pb->psize;
 

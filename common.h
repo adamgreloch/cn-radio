@@ -3,6 +3,7 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <ctype.h>
 #include <stddef.h>
 #include <netdb.h>
 #include "err.h"
@@ -56,6 +57,11 @@ inline static int create_socket(uint16_t port) {
             INADDR_ANY); // listening on all interfaces
     server_address.sin_port = htons(port);
 
+    // make socket reusable
+    int opt = 1;
+    CHECK_ERRNO(
+            setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)));
+
     // bind the socket to a concrete address
     CHECK_ERRNO(bind(socket_fd, (struct sockaddr *) &server_address,
                      (socklen_t) sizeof(server_address)));
@@ -71,9 +77,6 @@ inline static int create_timeoutable_socket(uint16_t port) {
     tv.tv_usec = 0;
     CHECK_ERRNO(setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof
             (tv)));
-    int opt = 1;
-    CHECK_ERRNO(
-            setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)));
 
     return socket_fd;
 }
@@ -147,14 +150,9 @@ inline static void enable_multicast(int socket_fd, struct sockaddr_in
     ip_mreq.imr_interface.s_addr = htonl(INADDR_ANY);
     ip_mreq.imr_multiaddr = mcast_addres->sin_addr;
 
-    IN_MULTICAST(ip_mreq.imr_multiaddr.s_addr);
+    ENSURE(IN_MULTICAST(ntohl(ip_mreq.imr_multiaddr.s_addr)));
     CHECK_ERRNO(setsockopt(socket_fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *)
             &ip_mreq, sizeof(ip_mreq)));
-
-    // disable self-reception
-    int opt = 0;
-    CHECK_ERRNO(setsockopt(socket_fd, IPPROTO_IP, IP_MULTICAST_LOOP, &opt,
-                           sizeof(opt)));
 }
 
 inline static in_addr_t check_address(char *addr) {
@@ -183,6 +181,33 @@ char *portStr) {
     freeaddrinfo(ai);
 
     return ret;
+}
+
+inline static bool is_number(char *str) {
+    size_t i = 0;
+    char c;
+    while ((c = str[i]) != '\0')
+        if (!isdigit(c))
+            return false;
+        else i++;
+    return true;
+}
+
+inline static bool is_number_with_blanks(char *str) {
+    size_t i = 0;
+    int phase = 0;
+    char c;
+    while ((c = str[i]) != '\0') {
+        if (phase == 0 && isdigit(c))
+            phase = 1;
+        else if (phase == 1 && isblank(c))
+            phase = 2;
+        else if ((phase == 2 && isdigit(c)) || (!isdigit(c) && !isblank(c)))
+            return false;
+        // else: if c is blank and phase 0, go ahead
+        i++;
+    }
+    return phase != 0;
 }
 
 #endif //_COMMON_
