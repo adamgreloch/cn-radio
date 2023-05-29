@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 
-#define LOOKUP_STR "ZERO_SEVEN_COME_IN\n"
+#define LOOKUP_STR "ZERO_SEVEN_COME_IN"
 #define REPLY_STR "BOREWICZ_HERE"
 #define REXMIT_STR "LOUDER_PLEASE"
 
@@ -16,7 +16,7 @@ int reply_strlen = strlen(REPLY_STR);
 int rexmit_strlen = strlen(REXMIT_STR);
 
 int write_lookup(char *buf) {
-    return sprintf(buf, "%s", LOOKUP_STR);
+    return sprintf(buf, "%s\n", LOOKUP_STR);
 }
 
 int write_reply(char *buf, char *mcast_addr_str, uint16_t port,

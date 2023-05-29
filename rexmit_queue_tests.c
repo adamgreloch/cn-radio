@@ -6,9 +6,9 @@
 typedef struct tree_node tree_node;
 
 struct tree_node {
-    tree_node* left;
+    tree_node *left;
     uint64_t num;
-    tree_node* right;
+    tree_node *right;
 };
 
 tree_node *init_node(uint64_t num) {
@@ -48,13 +48,13 @@ uint64_t tree_to_arr(tree_node *root, uint64_t **arr, uint64_t *arr_size) {
 
 
 int main() {
-    tree_node * t = NULL;
+    tree_node *t = NULL;
     for (int i = 0; i < 10; i++)
         t = insert(t, i);
     for (int i = 0; i < 10; i++)
         t = insert(t, i);
 
-    uint64_t* arr = NULL;
+    uint64_t *arr = NULL;
     uint64_t arr_size = 0;
     uint64_t count = tree_to_arr(t, &arr, &arr_size);
 

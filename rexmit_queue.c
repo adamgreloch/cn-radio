@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include "rexmit_queue.h"
 
-static bool debug = true;
+static bool debug = false;
 
 typedef struct tree_node tree_node;
 

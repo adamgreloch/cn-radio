@@ -184,12 +184,12 @@ inline static sender_opts *get_sender_opts(int argc, char **argv) {
                 break;
             case 'n':
                 errflag |= parse_name_from_opt(opts->sender_name,
-                                              MAX_NAME_LEN);
+                                               MAX_NAME_LEN);
                 break;
             case 'p':
                 errflag |= parse_num_from_opt(&opts->psize, true);
                 if (opts->psize + sizeof(struct audio_pack) >
-                        UDP_IPV4_DATASIZE) {
+                    UDP_IPV4_DATASIZE) {
                     fprintf(stderr,
                             "Pack size larger than possible to send: %lu\n",
                             opts->psize);
@@ -274,7 +274,7 @@ inline static receiver_opts *get_receiver_opts(int argc, char **argv) {
                 break;
             case 'n':
                 errflag |= parse_name_from_opt(opts->sender_name,
-                                              MAX_NAME_LEN);
+                                               MAX_NAME_LEN);
                 break;
             case '?':
                 if (optopt == 'b' || optopt == 'd' || optopt == 'C' ||

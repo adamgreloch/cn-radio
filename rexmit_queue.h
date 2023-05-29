@@ -34,7 +34,8 @@ rexmit_queue *rq_init(uint64_t psize, uint64_t fsize);
  * @param n_packs - number of elements in @p requested_packs
  * @param receiver_addr - address of the receiver that issued the requested
  */
-void rq_add_requests(rexmit_queue *rq, uint64_t *requested_packs, uint64_t n_packs);
+void
+rq_add_requests(rexmit_queue *rq, uint64_t *requested_packs, uint64_t n_packs);
 
 /**
  * Gets an array with first_byte_nums of packs that were requested for

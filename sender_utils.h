@@ -53,7 +53,7 @@ inline static sender_data *sd_init(int argc, char **argv) {
     sd->mcast_addr_str = opts->mcast_addr_str;
     sd->mcast_send_sock_fd = socket(PF_INET, SOCK_DGRAM, 0);
     sd->mcast_addr = get_send_address(sd->mcast_addr_str,
-                                                     sd->port);
+                                      sd->port);
     enable_multicast(sd->mcast_send_sock_fd, &sd->mcast_addr);
 
     sd->send_buffer = calloc(sd->psize + 16, 1);

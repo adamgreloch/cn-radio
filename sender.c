@@ -7,7 +7,7 @@
 #include "rexmit_queue.h"
 #include "sender_utils.h"
 
-static bool debug = true;
+static bool debug = false;
 
 static void *pack_sender(void *args) {
     sender_data *sd = args;
