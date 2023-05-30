@@ -2,8 +2,6 @@
 #include <pthread.h>
 #include <assert.h>
 
-static bool debug = false;
-
 struct pack_buffer {
     byte *buf;                                        /**< data buffer */
     byte *buf_end;                             /**< end of data buffer */
@@ -99,11 +97,8 @@ void pb_find_missing(pack_buffer *pb, uint64_t *n_packs,
             missing_byte_num = pb->head_byte_num - (pb->head - shift - pos);
 
             if (missing_byte_num < pb->head_byte_num &&
-                missing_byte_num > pb->byte_zero) {
+                missing_byte_num > pb->byte_zero)
                 (*missing_buf)[last++] = missing_byte_num;
-                if (debug)
-                    fprintf(stderr, "missing %lu\n", missing_byte_num);
-            }
 
         }
 

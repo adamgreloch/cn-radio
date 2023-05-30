@@ -7,8 +7,6 @@
 #include "rexmit_queue.h"
 #include "sender_utils.h"
 
-static bool debug = false;
-
 static void *pack_sender(void *args) {
     sender_data *sd = args;
     uint64_t pack_num = 0;
@@ -76,8 +74,6 @@ static void *ctrl_listener(void *args) {
             case REXMIT:
                 memset(packs, 0, CTRL_BUF_SIZE);
                 parse_rexmit(buffer, packs, &n_packs);
-                if (debug)
-                    fprintf(stderr, "got rexmit!\n");
                 rq_add_requests(sd->rq, packs, n_packs);
                 break;
         }
@@ -106,8 +102,7 @@ static void *pack_retransmitter(void *args) {
 
     while (!is_finished(sd)) {
         if ((n_packs = rq_get_requests(sd->rq, &requested_nums,
-                                       &arr_size)) > 0) {
-            fprintf(stderr, "%lu to retransmit\n", n_packs);
+                                       &arr_size)) > 0)
             for (uint64_t i = 0; i < n_packs; i++)
                 if (rq_get_pack(sd->rq, audio_data, requested_nums[i])) {
                     pack.first_byte_num = htobe64(requested_nums[i]);
@@ -115,11 +110,7 @@ static void *pack_retransmitter(void *args) {
                     pack.audio_data = audio_data;
                     send_pack(sd->mcast_send_sock_fd, &sd->mcast_addr, &pack,
                               sd);
-                    if (debug)
-                        fprintf(stderr, "retransmitted %lu\n",
-                                requested_nums[i]);
                 }
-        }
         usleep(sd->rtime_u);
     }
 

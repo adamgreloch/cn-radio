@@ -2,8 +2,6 @@
 #include <unistd.h>
 #include "rexmit_queue.h"
 
-static bool debug = false;
-
 typedef struct tree_node tree_node;
 
 struct tree_node {
@@ -119,9 +117,6 @@ void rq_add_pack(rexmit_queue *rq, struct audio_pack *pack) {
     if (rq->head + rq->psize >= rq->queue_end)
         rq->head = rq->queue;
 
-    if (debug)
-        fprintf(stderr, "added pack %lu\n", rq->head_byte_num);
-
     CHECK_ERRNO(pthread_mutex_unlock(&rq->mutex));
 }
 
@@ -137,17 +132,10 @@ static byte *_find_pack(rexmit_queue *rq, uint64_t first_byte_num) {
 
 static void _bind_addr_to_pack(rexmit_queue *rq, uint64_t first_byte_num) {
     if (first_byte_num < rq->tail_byte_num ||
-        first_byte_num > rq->head_byte_num) {
-        if (debug)
-            fprintf(stderr, "too late (%lu, %lu, %lu)\n", rq->tail_byte_num,
-                    first_byte_num, rq->head_byte_num);
+        first_byte_num > rq->head_byte_num)
         return; // request invalid, ignore
-    }
 
     rq->pack_tree = insert(rq->pack_tree, first_byte_num);
-
-    if (debug)
-        fprintf(stderr, "bound addr to %lu\n", first_byte_num);
 }
 
 void

@@ -178,7 +178,8 @@ st_print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
     size_t wrote = 0;
     memset(st->ui_buffer, 0, st->ui_buffer_size);
     wrote += sprintf(st->ui_buffer,
-                     "\033[H\033[J%s SIK Radio\r\n%s", line_break, line_break);
+                     "\033[H\033[J%s\r\n SIK Radio\r\n\r\n%s\r\n", line_break,
+                     line_break);
 
     for (size_t i = 0; i < st->count; i++) {
         if (wrote + MAX_NAME_LEN + 16 > st->ui_buffer_size) {
@@ -189,15 +190,16 @@ st_print_ui(char **buf, uint64_t *buf_size, uint64_t *ui_size, stations *st) {
         }
         if (st->data[i] != st->current)
             wrote += sprintf(st->ui_buffer + wrote,
-                             " %s\r\n%s", st->data[i]->name, line_break);
+                             "%s\r\n\r\n", st->data[i]->name);
         else
             wrote += sprintf(st->ui_buffer + wrote,
-                             " > %s\r\n%s", st->data[i]->name, line_break);
+                             " > %s\r\n\r\n", st->data[i]->name);
     }
 
     if (st->count == 0)
-        wrote += sprintf(st->ui_buffer + wrote,
-                         " No stations found\r\n%s", line_break);
+        wrote += sprintf(st->ui_buffer + wrote, "No stations found\r\n\r\n");
+
+    wrote += sprintf(st->ui_buffer + wrote, "%s", line_break);
 
     if (*buf_size < wrote) {
         *buf = realloc(*buf, wrote);

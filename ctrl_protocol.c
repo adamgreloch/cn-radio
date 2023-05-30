@@ -81,8 +81,6 @@ int parse_rexmit(char *msg, uint64_t *packs, uint64_t *n_packs) {
     char *token;
     char *save_ptr;
 
-    fprintf(stderr, "REXMIT: '%s'", msg);
-
     *n_packs = 0;
 
     uint64_t byte_num;
@@ -95,7 +93,6 @@ int parse_rexmit(char *msg, uint64_t *packs, uint64_t *n_packs) {
             byte_num = strtoull(token, NULL, 10);
             if (errno == 0)
                 packs[(*n_packs)++] = byte_num;
-            fprintf(stderr, "strtoull got: %s -> %lu\n", token, byte_num);
         }
         token = strtok_r(NULL, ",", &save_ptr);
     }
